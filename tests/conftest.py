@@ -1,3 +1,4 @@
+import beeref  # noqa: F401 (loads the system C++ runtime before Qt)
 import os.path
 import pytest
 import uuid

@@ -17,7 +17,7 @@ from PyQt6.QtCore import Qt
 
 from beeref import commands
 from beeref.items import BeePixmapItem, BeeTextItem
-from beeref.rboard import attributes, pen as penlib
+from beeref.rboard import attributes, pen as penlib, semantic
 from beeref.rboard.ui import icons
 from beeref.rboard.ui.dialogs import NoteDialog, TagField
 from beeref.rboard.ui.homebar import HomeBar, StatusPill
@@ -32,7 +32,7 @@ SORT = {'all_if_none': True, 'icon': 'sort'}
 ATTRIBUTE_ICONS = {
     'shape': 'fit', 'channel': 'forward', 'board': 'image',
     'folder': 'folder', 'text': 'text', 'note': 'note', 'marks': 'pen',
-    'cover': 'sparkle', 'tag': 'star-outline',
+    'cover': 'sparkle', 'tag': 'star-outline', 'looks': 'sparkle',
 }
 
 
@@ -273,6 +273,9 @@ class BoardUIMixin:
             parts.append(f'{n} sub board{"" if n == 1 else "s"}')
         if self.pen_active:
             parts.append('pen on · esc to stop')
+        progress = getattr(self, '_content_progress', None)
+        if progress:
+            parts.append(f'reading content {progress[0]}/{progress[1]}')
         self.status_pill.set_text(' · '.join(parts))
 
     def rb_on_resize(self):
@@ -363,6 +366,8 @@ class BoardUIMixin:
                 ('action', 'arrange_horizontal', 'in a row', ALL),
                 ('action', 'arrange_vertical', 'in a column', ALL),
                 ('action', 'arrange_square', 'in a square', ALL)]),
+            ('sep',), ('label', 'content'),
+            ('action', 'group_content', 'group by content…', ALL),
             ('sep',), ('label', 'colour'),
             ('action', 'arrange_color_dominant', 'by dominant colour', SORT),
             ('action', 'arrange_color_average', 'by average colour', SORT),
@@ -390,6 +395,8 @@ class BoardUIMixin:
             ('action', 'generate_palette', 'make a palette…'),
             ('action', 'sample_color', 'pick a colour'),
             ('action', 'show_color_gamut', 'colour spread'),
+            ('sep',), ('label', 'content'),
+            ('action', 'index_content', 'read image content'),
             ('sep',), ('label', 'text and links'),
             ('action', 'extract_text', 'copy text from image'),
             ('action', 'index_text', 'read text in all images'),
@@ -624,9 +631,23 @@ class BoardUIMixin:
                 lambda: open_board('similar', 'similar images'),
                 {'icon': 'eye', 'count': len(similar),
                  'trailing_icon': 'subboard'}))
+        if semantic.vector(item) is None:
+            entries.append(('item', 'read image content…',
+                            self.on_action_index_content,
+                            {'icon': 'sparkle'}))
 
         targets = self.rb_targets(item)
         tags = attributes.tags_of(item)
+        board_key = self.board.key if self.is_subboard else ''
+        if board_key.startswith('tag:'):
+            # Confirm or drop suggestions straight from the tag's board
+            tag = board_key[4:]
+            entries += [('sep',), (
+                'item', f'remove from “{tag}”' if tag in tags
+                else f'add to “{tag}”',
+                (lambda: self.rb_remove_tag(targets, tag)) if tag in tags
+                else (lambda: self.rb_add_tag(targets, tag)),
+                {'icon': 'star-outline'})]
         entries += [('sep',), ('label', 'tags'), ('widget', lambda m: TagPills(
             m, tags,
             on_open=lambda t: open_board(f'tag:{t}', t),

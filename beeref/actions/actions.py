@@ -381,6 +381,19 @@ actions = ActionList([
         callback='on_action_import_pureref',
     ),
     Action(
+        id='group_content',
+        text='By &Content...',
+        shortcuts=['Ctrl+Shift+G'],
+        callback='on_action_group_content',
+        group='active_when_items_in_scene',
+    ),
+    Action(
+        id='index_content',
+        text='Read Image &Content',
+        callback='on_action_index_content',
+        group='active_when_items_in_scene',
+    ),
+    Action(
         id='pen_mode',
         text='&Pen',
         shortcuts=['P'],

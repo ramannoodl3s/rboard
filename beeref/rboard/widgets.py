@@ -163,6 +163,7 @@ class SearchBar(QtWidgets.QFrame):
     query_changed = QtCore.pyqtSignal(str)
     next_requested = QtCore.pyqtSignal()
     index_requested = QtCore.pyqtSignal()
+    meaning_requested = QtCore.pyqtSignal()
     closed = QtCore.pyqtSignal()
 
     def __init__(self, parent):
@@ -173,7 +174,7 @@ class SearchBar(QtWidgets.QFrame):
         layout.setContentsMargins(8, 6, 8, 6)
         self.field = QtWidgets.QLineEdit()
         self.field.setPlaceholderText(
-            'search text in images, notes, tags, links…')
+            'search text, notes, tags, links, or what images show…')
         self.field.setMinimumWidth(320)
         self.field.setClearButtonEnabled(True)
         layout.addWidget(self.field)
@@ -182,6 +183,12 @@ class SearchBar(QtWidgets.QFrame):
         self.index_button = QtWidgets.QPushButton()
         self.index_button.clicked.connect(self.index_requested)
         layout.addWidget(self.index_button)
+        self.meaning_button = QtWidgets.QPushButton()
+        self.meaning_button.setToolTip(
+            'also find images that look like what you type')
+        self.meaning_button.clicked.connect(self.meaning_requested)
+        self.meaning_button.hide()
+        layout.addWidget(self.meaning_button)
         close = QtWidgets.QToolButton()
         close.setText('✕')
         close.setAutoRaise(True)
@@ -219,10 +226,20 @@ class SearchBar(QtWidgets.QFrame):
         self.index_button.setText(
             f'Read text in {count} image{"" if count == 1 else "s"}')
 
-    def set_count(self, count, query):
-        self.count.setText(
-            '' if not query else
-            f'{count} match{"" if count == 1 else "es"}')
+    def set_count(self, count, query, looks=None):
+        if not query:
+            self.count.setText('')
+            return
+        text = f'{count} match{"" if count == 1 else "es"}'
+        if looks:
+            text += f' · {looks} look like it'
+        self.count.setText(text)
+
+    def refresh_meaning(self, label):
+        """label is '' when search by meaning is ready."""
+        self.meaning_button.setVisible(bool(label))
+        self.meaning_button.setText(label)
+        self.reposition()
 
     def reposition(self):
         self.adjustSize()

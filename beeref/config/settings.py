@@ -169,6 +169,12 @@ class BeeSettings(QtCore.QSettings):
             'default': 'free',
             'validate': lambda x: x in ('free', 'circle', 'arrow', 'eraser'),
         },
+        'Content/auto_index': {
+            # Read new images' content in the background once the model
+            # is installed
+            'default': True,
+            'cast': lambda x: x in (True, 'true', '1', 1),
+        },
         'Arena/max_side': {
             # Longest image side for Are.na imports; 0 = full resolution
             'default': 2048,

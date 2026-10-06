@@ -62,6 +62,8 @@ class SubBoard:
         self.sources = sources
         self.parent = parent      # parent SubBoard, None = main board
         self.layout = None        # cached [(source, x, y, scale, z)]
+        self.headers = []         # cached [(text, x, y, scale)]
+        self.sections = None      # [(title, sources)] to lay out apart
         self.window = None
 
     @property
@@ -99,10 +101,34 @@ class SubBoardManager(QtCore.QObject):
             # Put the image itself first
             sources.remove(anchor)
             sources.insert(0, anchor)
+        sections = None
+        if key.startswith('tag:'):
+            suggested = self.tag_suggestions(key[4:], candidates, sources)
+            if suggested:
+                sections = [(f'tagged · {len(sources)}', sources),
+                            (f'suggested · {len(suggested)} · right-click '
+                             'to add the tag', suggested)]
+                sources = sources + suggested
         board = SubBoard(label, key, sources, parent)
+        board.sections = sections
         self.boards.append(board)
         self.show(board)
         return board
+
+    @staticmethod
+    def tag_suggestions(tag, candidates, tagged):
+        """Untagged images the content model thinks fit a custom tag, by
+        the same rule as built-in labels plus your tagged examples."""
+        from beeref.rboard import semantic
+        if not any(semantic.vector(c) is not None for c in candidates):
+            return []
+        try:
+            return semantic.suggest_for_tag(
+                tag, candidates, tagged,
+                use_text=semantic.installed('text'))
+        except Exception:
+            logger.exception('Tag suggestions failed')
+            return []
 
     def show(self, board):
         if board.window:

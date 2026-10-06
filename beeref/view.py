@@ -32,6 +32,7 @@ from beeref import widgets
 from beeref.items import BeePixmapItem, BeeTextItem
 from beeref.main_controls import MainControlsMixin
 from beeref.rboard.ui.board_ui import BoardUIMixin
+from beeref.rboard.ui.content_ui import ContentMixin
 from beeref.rboard.view_mixin import RBoardMixin
 from beeref.scene import BeeGraphicsScene
 from beeref.utils import get_file_extension_from_format, qcolor_to_hex
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 class BeeGraphicsView(MainControlsMixin,
                       RBoardMixin,
                       BoardUIMixin,
+                      ContentMixin,
                       QtWidgets.QGraphicsView,
                       ActionsMixin):
 
@@ -430,6 +432,7 @@ class BeeGraphicsView(MainControlsMixin,
             self.filename = filename
             self.scene.add_queued_items()
             self.on_action_fit_scene()
+            self.rb_after_images_added()
 
     def on_action_open_recent_file(self, filename):
         confirm = self.get_confirmation_unsaved_changes(
@@ -637,6 +640,7 @@ class BeeGraphicsView(MainControlsMixin,
         self.undo_stack.endMacro()
         if new_scene:
             self.on_action_fit_scene()
+        self.rb_after_images_added()
 
     def do_insert_images(self, filenames, pos=None):
         if not pos:

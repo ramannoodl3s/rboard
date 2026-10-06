@@ -47,13 +47,15 @@ def flow(sizes, gap):
     return out
 
 
-def justified(sizes, gap):
+def justified(sizes, gap, target=None, height=None):
     """Rows of equal height that all end at the same right edge
-    (like Are.na or Google Photos). The last row is not stretched."""
-    height = median(h for _, h in sizes)
+    (like Are.na or Google Photos). The last row is not stretched.
+    `target` sets the row width and `height` the row height, so several
+    blocks can share one look."""
+    height = height or median(h for _, h in sizes)
     widths = [w * height / h for w, h in sizes]
     total = sum(widths) * height
-    target = max(max(widths), math.sqrt(total) * 1.6)
+    target = max(max(widths), target or math.sqrt(total) * 1.6)
 
     rows, row = [], []
     for i, w in enumerate(widths):

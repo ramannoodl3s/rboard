@@ -44,7 +44,32 @@ custom themes, lowercase labels, Helvetica Neue.
 - **Pen** (P): freehand, circle, arrow and eraser in 8 colours and 3
   widths. Marks on an image move with it; Esc stops drawing.
 - **Settings**: theme picker, custom theme editor (four base colours, or
-  every colour), home bar timing, board, tools, imports, keyboard & mouse.
+  every colour), home bar timing, board, tools, content, imports,
+  keyboard & mouse.
+
+## Content understanding
+
+A small image model (OpenAI's CLIP, MIT licence) runs on your computer
+through ONNX Runtime. It's downloaded once on first use from
+huggingface.co/Xenova/clip-vit-base-patch32: the image model (89 MB) when
+you first group by content, the text model (67 MB) only for searching by
+meaning or matching custom tags by name. Nothing is uploaded. Once the
+image model is installed, new images are read in the background (about
+20 ms each) and the results are saved in the board.
+
+- **Group by content** (arrange menu, Ctrl+Shift+G): clusters images by
+  what they show, names each group (poster, interior, album cover…),
+  sorts each group by colour and labels it. Fewer/more groups slider.
+- **Image menu**: "album cover" (real detection, replacing the shape
+  guess), "looks like · interior" and other labels, and visually similar
+  images, each opening a sub board.
+- **Search by meaning**: Ctrl+F also finds images that look like what you
+  type ("people on a sofa").
+- **Custom tags** use the same matching as built-in labels: a tag's sub
+  board shows your tagged images plus *suggested* ones, found from the
+  tag's name and from the images you've tagged. Right-click a suggestion
+  to add the tag; each confirmed example improves the next suggestions.
+- Settings → content shows what's installed and can remove the models.
 
 ## Features
 

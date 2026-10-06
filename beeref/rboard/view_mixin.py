@@ -509,10 +509,13 @@ class RBoardMixin:
             self.search_bar.query_changed.connect(self.rb_search)
             self.search_bar.next_requested.connect(self.rb_search_next)
             self.search_bar.index_requested.connect(self.on_action_index_text)
+            self.search_bar.meaning_requested.connect(
+                self.rb_enable_meaning_search)
             self.search_bar.closed.connect(self.setFocus)
         self.search_matches = []
         self.search_index = -1
         self.search_bar.open(len(self.rb_unindexed()))
+        self.search_bar.refresh_meaning(self.rb_meaning_status())
 
     def rb_search(self, query):
         words = query.lower().split()
@@ -525,7 +528,17 @@ class RBoardMixin:
                 if all(w in haystack for w in words):
                     item.setSelected(True)
                     self.search_matches.append(item)
-        self.search_bar.set_count(len(self.search_matches), query)
+        text_count = len(self.search_matches)
+        # Also images that look like the query (content model)
+        looks = self.rb_semantic_search(query.strip()) if words else None
+        if looks:
+            for item in looks:
+                if item not in self.search_matches:
+                    item.setSelected(True)
+                    self.search_matches.append(item)
+        self.search_bar.set_count(
+            text_count, query, None if looks is None
+            else len(self.search_matches) - text_count)
         self.search_bar.reposition()
 
     def rb_search_next(self):
@@ -614,6 +627,7 @@ class RBoardMixin:
                 else:
                     self.on_action_fit_selection()
                 self.rb_notify(f'Added {len(results)} image(s)')
+                self.rb_after_images_added()
             elif not errors:
                 self.rb_notify('No new images found')
 
@@ -715,6 +729,7 @@ class RBoardMixin:
                 self.on_action_fit_scene()
             else:
                 self.on_action_fit_selection()
+            self.rb_after_images_added()
             msg = f'Imported {len(items)} item(s)'
             if skipped:
                 msg += f'; {skipped} image(s) could not be read'

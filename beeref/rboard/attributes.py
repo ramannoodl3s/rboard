@@ -104,8 +104,13 @@ def attributes(item):
         out.append((f'color:{family}', family, FAMILY_DOTS[family], 'auto'))
         t = tone(stats['average'])
         out.append((f'tone:{t}', t, stats['average'], 'auto'))
+    from beeref.rboard import semantic
+    model = semantic.entries(item)
+    if model:
+        out.extend(model)
     out.append((f'shape:{shape(item)}', shape(item), None, 'auto'))
-    if likely_album_cover(item):
+    if model is None and likely_album_cover(item):
+        # Without the content model, fall back to a shape-based guess
         out.append(('cover:likely', 'likely album cover', None, 'auto'))
     meta = item.meta
     if meta.get('arena_channel'):
@@ -139,7 +144,12 @@ def keys_of(item):
 
 
 def similar_to(item, candidates):
-    """Images that look like `item` (image hash + colour), incl. itself."""
+    """Images that look like `item`, incl. itself: by the content model
+    when it has seen them, else by image hash + colour."""
+    from beeref.rboard import semantic
+    by_content = semantic.similar(item, candidates)
+    if by_content is not None:
+        return by_content
     stats = item.meta.get('analysis')
     if not stats:
         return [item]

@@ -13,6 +13,8 @@ from PyQt6 import QtCore, QtWidgets
 
 from beeref import constants
 from beeref.assets import BeeAssets
+from beeref.items import BeeTextItem
+from beeref.rboard import layouts
 from beeref.rboard.subboards import (
     SUBBOARD_DISABLED, initial_placements, linked_copy)
 from beeref.view import BeeGraphicsView
@@ -111,6 +113,13 @@ class SubBoardWindow(QtWidgets.QMainWindow):
         self.move(geo.x() + offset, geo.y() + offset)
         self.populate()
 
+    def add_header(self, text, x, y, scale):
+        header = BeeTextItem(text)
+        header.setScale(scale)
+        header.setPos(x, y)
+        header.is_header = True
+        self.view.scene.addItem(header)
+
     def populate(self):
         scene = self.view.scene
         live = set(map(id, self.manager.live_sources(self.board)))
@@ -123,6 +132,10 @@ class SubBoardWindow(QtWidgets.QMainWindow):
                 item.setPos(x, y)
                 item.setZValue(z)
                 scene.addItem(item)
+            for text, x, y, scale in self.board.headers:
+                self.add_header(text, x, y, scale)
+        elif self.board.sections:
+            self.populate_sections(live)
         else:
             items = []
             for source in self.board.sources:
@@ -143,6 +156,45 @@ class SubBoardWindow(QtWidgets.QMainWindow):
         self.view.update_window_title()
         QtCore.QTimer.singleShot(0, self.view.on_action_fit_scene)
 
+    def populate_sections(self, live):
+        """Each section as its own block of justified rows under a
+        heading, all lining up at the same width."""
+        scene = self.view.scene
+        blocks = []
+        for title, sources in self.board.sections:
+            items = []
+            for source in sources:
+                if id(source) in live:
+                    item = linked_copy(source)
+                    scene.addItem(item)
+                    items.append(item)
+            if items:
+                blocks.append((title, items))
+        everything = [i for _, items in blocks for i in items]
+        if not everything:
+            return
+        gap = self.view.rb_gap(everything)
+        rects = {i: scene.itemsBoundingRect(items=[i]) for i in everything}
+        total = sum(r.width() * r.height() for r in rects.values())
+        heights = sorted(r.height() for r in rects.values())
+        label_h = heights[len(heights) // 2] * 0.3
+        width = (total ** 0.5) * 1.6
+        y = 0
+        for title, items in blocks:
+            probe = BeeTextItem(title)
+            scale = label_h / max(probe.boundingRect().height(), 1)
+            self.add_header(title, 0, y, scale)
+            y += label_h * 1.6
+            sizes = [(rects[i].width(), rects[i].height()) for i in items]
+            placements = layouts.justified(sizes, gap, target=width,
+                                           height=heights[len(heights) // 2])
+            for item, (x, py, f) in zip(items, placements):
+                item.setScale(item.scale() * f)
+                rect = scene.itemsBoundingRect(items=[item])
+                item.setPos(item.pos() + QtCore.QPointF(x, y + py)
+                            - rect.topLeft())
+            y += layouts.bounds(sizes, placements)[1] + gap * 8
+
     def layout_snapshot(self):
         out = []
         for item in self.view.scene.items_for_save():
@@ -156,7 +208,13 @@ class SubBoardWindow(QtWidgets.QMainWindow):
         self.discarding = True
         self.close()
 
+    def header_snapshot(self):
+        return [(i.toPlainText(), i.pos().x(), i.pos().y(), i.scale())
+                for i in self.view.scene.items_for_save()
+                if getattr(i, 'is_header', False)]
+
     def closeEvent(self, event):
         if not self.discarding and self.board.window is self:
+            self.board.headers = self.header_snapshot()
             self.manager.on_window_closed(self.board, self.layout_snapshot())
         event.accept()
