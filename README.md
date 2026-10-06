@@ -2,7 +2,7 @@
 
 A moodboard app for Windows: a fork of the reference image viewer
 [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu, with colour
-sorting, palettes, text reading, Are.na and PureRef import, sub boards,
+sorting, palettes, text reading, PureRef import, sub boards, links,
 notes, tags and a pen. Everything BeeRef does still works.
 New code lives in `beeref/rboard/`; changes to BeeRef's own files are small
 hooks (menus, item metadata, palette loading).
@@ -17,9 +17,20 @@ python -m venv .venv
 .venv\Scripts\rboard.exe
 ```
 
+## Portable build
+
+```
+.venv\Scripts\pip install -r requirements\build.txt
+.venv\Scripts\pyinstaller RBoard.spec --noconfirm
+```
+
+This makes `dist\R Board\` with `R Board.exe`; zip that folder to share
+it. Nothing needs installing on the other computer. The content model is
+downloaded on first use, as when running from source.
+
 ## Interface (Softclub)
 
-The interface follows the Softclub design in `design/softclub/`: six
+The interface follows the Softclub design (made in Claude Design): six
 themes (Carbon, Teal Room, Handset, Albumen, Pictogram, Blood Orange) plus
 custom themes, lowercase labels, Helvetica Neue.
 
@@ -44,10 +55,17 @@ custom themes, lowercase labels, Helvetica Neue.
   image menu opens everything connected as a flowchart sub board.
 - **Sub boards** open in their own window with linked copies of the
   images: arranging, sorting and removing stay local, while notes, tags and
-  pen marks are shared with the main board (and undo there). They live in
-  memory only: closing a window caches it, and they're discarded when the
-  main board changes or the app closes. The **layers** menu lists them
-  (open / cached, nested under the board they came from).
+  pen marks are shared with the main board (and undo there). Make one from
+  a tag (right-click), a link tree, or **new sub board…** (layers menu,
+  Ctrl+Shift+B): tags to include (all or any of them) and tags to leave
+  out, e.g. *yellow, nighttime* without *blue*. Words that aren't tags on
+  the board are matched by what the images show (needs the content
+  model's text part).
+- The **layers** menu lists every sub board and tree from this session,
+  nested under the board they came from. Hover one to open it, keep it in
+  the board file, or remove it. Kept sub boards and all link trees are
+  saved in the `.brd` with their layouts and come back next time; the
+  rest are discarded when the app closes.
 - **Notes** (N): a note per image, shown as a callout on hover or
   selection (or always: Shift+N).
 - **Tags** (T): your own tags, from the image menu or the notes menu.
@@ -56,14 +74,15 @@ custom themes, lowercase labels, Helvetica Neue.
 - **Settings**: theme picker, custom theme editor (four base colours, or
   every colour), home bar timing, interface size (200% by default, on top
   of what Windows already scales), interface font (any installed font or
-  a font file you add), board, tools, content, imports, keyboard & mouse.
+  a font file you add), board, tools, content, keyboard & mouse.
 
 ## Board files
 
 R Board saves `.brd` files: the same SQLite layout as BeeRef's `.bee`
 (images, positions, and R Board's per-image data such as tags, notes,
 links, palettes and what the content model read) plus a table of
-board-level data (where you were looking, your tag list). `.bee` boards
+board-level data (where you were looking, your tag list, kept sub
+boards and link trees). `.bee` boards
 open too; saving one writes a `.brd` next to it and leaves the `.bee` as
 it was. Save as can still write a plain `.bee` for BeeRef.
 
@@ -108,20 +127,22 @@ image model is installed, new images are read in the background (about
 | Images | View Palette — the selection's (or board's) colours by prominence, with hex codes | Shift+P |
 | Images | Copy Text from Image (Windows OCR, no download) | Ctrl+Shift+T |
 | Images | Read Text in All Images — makes image text searchable | |
-| Images | Open Source Link (Are.na block page) | Ctrl+L |
+| Images | Open Source Link (e.g. the Are.na block page) | Ctrl+L |
 | Edit | Find Text — searches image text, notes, file names, links | Ctrl+F |
 | Edit | Find by Color — selects images containing a color | Ctrl+Shift+F |
 | Edit | Select Duplicates — keeps the largest copy of each | |
 | View | Value Study — images as 2–8 gray tones | Shift+G |
-| Insert | From Are.na — paste a channel or block link | Ctrl+Shift+I |
 | Pen | Draw on images and the canvas | P |
 | Notes | Note on the selected image / always show notes | N / Shift+N |
 | Tags | Tag the selected images | T |
 | Links | Link the selected image to another (or chain several) | L |
-| Insert | Sync Are.na Channels — adds blocks added since import | |
+| Layers | New Sub Board — tags to include and leave out | Ctrl+Shift+B |
 | File | Import PureRef Board (2.x .pur) | |
 
-You can also drop a `.pur` file or an Are.na link onto the window.
+You can also drop a `.pur` file onto the window, or a folder of images.
+If the folder has a `links.txt` (file name, a tab, its link; one per
+line), the images get those source links. The separate Are.na Grabber
+writes one, so Are.na images still link back to their blocks.
 
 Layouts work on the current reading order, so "By Dominant Color" followed
 by "Justified Rows" gives justified rows in color order. All arranging,

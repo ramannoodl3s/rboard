@@ -364,18 +364,6 @@ actions = ActionList([
         callback='on_action_value_study_levels',
     ),
     Action(
-        id='import_arena',
-        text='From &Are.na...',
-        shortcuts=['Ctrl+Shift+I'],
-        callback='on_action_import_arena',
-    ),
-    Action(
-        id='sync_arena',
-        text='S&ync Are.na Channels',
-        callback='on_action_sync_arena',
-        group='active_when_items_in_scene',
-    ),
-    Action(
         id='import_pureref',
         text='Import &PureRef Board...',
         callback='on_action_import_pureref',
@@ -421,6 +409,13 @@ actions = ActionList([
         shortcuts=['T'],
         callback='on_action_tag_images',
         group='active_when_selection',
+    ),
+    Action(
+        id='new_subboard',
+        text='New &Sub Board...',
+        shortcuts=['Ctrl+Shift+B'],
+        callback='on_action_new_subboard',
+        group='active_when_items_in_scene',
     ),
     Action(
         id='link_images',

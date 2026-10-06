@@ -22,6 +22,7 @@ from beeref.fileio.errors import BeeFileIOError
 from beeref.fileio.image import load_image
 from beeref.fileio.sql import SQLiteIO, is_bee_file, is_rboard_file
 from beeref.items import BeePixmapItem
+from beeref.rboard import sidecar
 
 
 __all__ = [
@@ -69,6 +70,7 @@ def load_images(filenames, pos, scene, worker):
             continue
 
         item = BeePixmapItem(img, filename)
+        sidecar.apply(item, filename)  # R Board: source links (links.txt)
         item.set_pos_center(pos)
         scene.add_item_later({'item': item, 'type': 'pixmap'}, selected=True)
         items.append(item)

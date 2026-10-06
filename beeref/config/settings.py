@@ -189,12 +189,6 @@ class BeeSettings(QtCore.QSettings):
             'default': True,
             'cast': lambda x: x in (True, 'true', '1', 1),
         },
-        'Arena/max_side': {
-            # Longest image side for Are.na imports; 0 = full resolution
-            'default': 2048,
-            'cast': int,
-            'validate': lambda x: x in (0, 1024, 2048, 4096),
-        },
     }
 
     def __init__(self):

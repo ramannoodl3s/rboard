@@ -295,9 +295,6 @@ class BoardUIMixin:
             ('action', 'insert_images', 'images…'),
             ('action', 'insert_text', 'text'),
             ('action', 'paste', 'paste'),
-            ('sep',),
-            ('action', 'import_arena', 'from Are.na…'),
-            ('action', 'sync_arena', 'sync Are.na channels'),
         ]
 
     def rb_menu_arrange(self):
@@ -454,29 +451,103 @@ class BoardUIMixin:
         entries = [('label', 'layers'),
                    ('item', name, self.rb_focus_main,
                     {'icon': 'image', 'count': n_main,
-                     'checked': current is None and self.is_subboard})]
+                     'checked': current is None and self.is_subboard}),
+                   ('action', 'new_subboard', 'new sub board…',
+                    {'icon': 'plus'})]
         boards = manager.tree()
         if not boards:
-            entries.append(('item', 'right-click an image to open one',
+            entries.append(('item', 'or right-click an image for one',
                             None, {'enabled': False, 'indent': 1}))
         for board in boards:
+            state = 'tree' if board.is_tree else (
+                'kept' if board.saved else board.state)
             entries.append((
-                'item', board.title,
-                lambda b=board: manager.show(b),
+                'submenu', board.title,
+                lambda b=board: self.rb_board_entries(b),
                 {'indent': board.depth() + 1,
-                 'kbd': f'{len(board.sources)} · {board.state}',
+                 'icon': 'link' if board.is_tree else
+                 ('star-outline' if board.saved else 'layers'),
+                 'hint': state, 'count': len(board.sources),
                  'checked': board is current}))
         entries.append(('sep',))
-        if self.is_subboard:
-            entries.append(('item', 'discard this sub board',
-                            lambda: manager.discard(self.board)))
         entries += [
             ('item', 'close all sub boards', manager.close_all,
              {'enabled': any(b.window for b in boards)}),
             ('item', 'discard closed sub boards', manager.discard_cached,
-             {'enabled': any(not b.window for b in boards)}),
+             {'enabled': any(not b.window and not b.kept for b in boards),
+              'tooltip': "kept boards and trees stay"}),
         ]
         return entries
+
+    def rb_board_entries(self, board):
+        """What you can do with one sub board, from the layers menu."""
+        manager = self.rb_manager()
+        entries = [('item', 'open', lambda: manager.show(board),
+                    {'icon': 'subboard'})]
+        if board.is_tree:
+            entries.append(('item', 'trees are always kept', None,
+                            {'enabled': False, 'checked': True}))
+        else:
+            entries.append(('item', 'keep in this board file',
+                            lambda: self.rb_keep_board(board,
+                                                       not board.saved),
+                            {'checked': board.saved}))
+        entries += [('sep',),
+                    ('item', 'remove', lambda: self.rb_remove_board(board),
+                     {'danger': True})]
+        return entries
+
+    def rb_keep_board(self, board, saved):
+        """Keep a sub board in the board file (undoable, so the board
+        shows unsaved changes)."""
+        from beeref.rboard.subboards import ManagerChange
+        manager = self.rb_manager()
+        self.rb_main().undo_stack.push(ManagerChange(
+            'Keep sub board' if saved else "Don't keep sub board",
+            lambda: manager.set_saved(board, saved),
+            lambda: manager.set_saved(board, not saved)))
+        if saved:
+            self.rb_notify(f'"{board.title}" is kept · save the board to '
+                           'store it')
+
+    def rb_remove_board(self, board):
+        manager = self.rb_manager()
+        if board.kept:
+            answer = QtWidgets.QMessageBox.question(
+                self, 'remove sub board',
+                f'remove "{board.title}"? it\'s kept in the board file; '
+                'this takes it out (the images stay on the board).')
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            from beeref.rboard.subboards import ManagerChange
+            main = self.rb_main()
+            main.undo_stack.push(ManagerChange(
+                'Remove sub board', lambda: manager.discard(board),
+                lambda: manager.add(board)))
+        else:
+            manager.discard(board)
+
+    def on_action_new_subboard(self):
+        """Make a sub board from tags to include and to leave out."""
+        from beeref.rboard import semantic
+        from beeref.rboard.ui.subboard_dialog import SubBoardDialog
+        images, sources = self.rb_candidates()
+        if not images:
+            self.rb_notify('add some images first')
+            return
+        if self.rb_analyze(images) is None:
+            return
+        self.rb_main().rb_refresh_profile()
+        by_meaning = semantic.installed('text') and any(
+            semantic.vector(i) is not None for i in images)
+        dialog = SubBoardDialog(self, sources, by_meaning)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        parent = self.board if self.is_subboard else None
+        board = self.rb_manager().open_query(dialog.title(), dialog.rule(),
+                                             sources, parent)
+        if dialog.save.isChecked():
+            self.rb_keep_board(board, True)
 
     def rb_focus_main(self):
         window = self.rb_main().parent

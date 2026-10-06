@@ -16,10 +16,10 @@ from PyQt6.QtCore import Qt
 
 from beeref import commands, fileio, widgets
 from beeref.items import BeePixmapItem, BeeTextItem
-from beeref.rboard import analysis, arena, attributes, layouts, ocr, pureref
+from beeref.rboard import analysis, attributes, layouts, ocr, pureref, sidecar
 from beeref.rboard.palette_item import BeePaletteItem
 from beeref.rboard.widgets import (
-    ArenaImportDialog, FindColorDialog, SearchBar)
+    FindColorDialog, SearchBar)
 
 
 logger = logging.getLogger(__name__)
@@ -66,44 +66,6 @@ def _run_ocr(count, worker):
                 errors.append(str(e))
         worker.progress.emit(i)
     worker.finished.emit('', errors[:1])
-
-
-def _run_arena(jobs, max_side, skip_keys, worker):
-    """Download images for each (url, anchor_rect) job; created items are
-    collected on worker.arena_results as (job index, item) pairs."""
-    errors = []
-    worker.arena_results = []
-    for job, (url, _) in enumerate(jobs):
-
-        def on_image(i, entry, data, job=job):
-            img = QtGui.QImage.fromData(data)
-            if img.isNull():
-                return
-            item = BeePixmapItem(img, entry['key'].replace('/', '_'))
-            item.meta.update({
-                'source_url': entry['source_url'],
-                'arena_key': entry['key'],
-                'arena_channel': entry['channel'],
-            })
-            worker.arena_results.append((job, item))
-            worker.scene.add_item_later(
-                {'item': item, 'type': 'pixmap'}, selected=True)
-            worker.progress.emit(i)
-
-        try:
-            _, failed = arena.fetch(
-                url, max_side, skip_keys,
-                on_found=worker.begin_processing.emit,
-                on_image=on_image,
-                is_canceled=lambda: worker.canceled)
-            if failed:
-                errors.append(f'{failed} image(s) could not be downloaded.')
-        except Exception as e:
-            logger.exception(f'Are.na import failed for {url}')
-            errors.append(f'{url}: {e}')
-        if worker.canceled:
-            break
-    worker.finished.emit('', errors)
 
 
 def _run_pureref(filename, worker):
@@ -167,6 +129,7 @@ class RBoardMixin:
             'view': {'scale': self.get_scale(),
                      'center': [center.x(), center.y()]},
             'tags': attributes.all_tags(self.rb_images()),
+            'subboards': self.subboards.snapshot(),
         }
 
     def rb_restore_view(self, data):
@@ -601,113 +564,26 @@ class RBoardMixin:
         for url in urls[:10]:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
 
-    # ---------- Are.na ----------
-
-    def on_action_import_arena(self):
-        self.cancel_active_modes()
-        dialog = ArenaImportDialog(self, self.settings)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        url, max_side = dialog.values()
-        existing = self.scene.itemsBoundingRect()
-        anchor = None if existing.isNull() else existing
-        self.rb_start_arena([(url, anchor)], max_side, set(),
-                            'Importing from Are.na…')
-
-    def on_action_sync_arena(self):
-        self.cancel_active_modes()
-        images = self.rb_images()
-        channels = {}
-        for item in images:
-            channel = item.meta.get('arena_channel')
-            if channel:
-                channels.setdefault(channel, []).append(item)
-        if not channels:
-            self.rb_notify('No images on this board came from Are.na')
-            return
-        jobs = [(url, self.scene.itemsBoundingRect(items=members))
-                for url, members in channels.items()]
-        keys = {i.meta.get('arena_key') for i in images} - {None}
-        self.rb_start_arena(
-            jobs, self.settings.valueOrDefault('Arena/max_side'), keys,
-            f'Checking {len(jobs)} Are.na channel(s) for new images…')
-
-    def rb_start_arena(self, jobs, max_side, skip_keys, label):
-        new_scene = not self.scene.items()
-        self.scene.deselect_all_items()
-        self.undo_stack.beginMacro('Import from Are.na')
-        worker = fileio.ThreadedIO(_run_arena, jobs, max_side, skip_keys)
-        worker.scene = self.scene
-        worker.progress.connect(self.on_items_loaded)
-
-        def finished(filename, errors):
-            self.scene.add_queued_items()
-            results = worker.arena_results
-            if results:
-                self.undo_stack.push(commands.InsertItems(
-                    self.scene, [i for _, i in results],
-                    ignore_first_redo=True))
-                for job, (url, anchor) in enumerate(jobs):
-                    items = [i for j, i in results if j == job]
-                    if items:
-                        self.rb_place_new(items, anchor)
-            self.undo_stack.endMacro()
-            if errors:
-                QtWidgets.QMessageBox.warning(
-                    self, 'Are.na', '<br>'.join(errors))
-            if results:
-                self.scene.clearSelection()
-                for _, item in results:
-                    item.setSelected(True)
-                if new_scene:
-                    self.on_action_fit_scene()
-                else:
-                    self.on_action_fit_selection()
-                self.rb_notify(f'Added {len(results)} image(s)')
-                self.rb_after_images_added()
-            elif not errors:
-                self.rb_notify('No new images found')
-
-        worker.finished.connect(finished)
-        self.worker = worker
-        self.progress = widgets.BeeProgressDialog(
-            label, worker=worker, parent=self)
-        worker.start()
-
-    def rb_place_new(self, items, anchor):
-        """Lay out new items in rows, to the right of `anchor` (a scene
-        rect) or around the view centre."""
-        sizes = [(r.width(), r.height()) for r in (
-            self.scene.itemsBoundingRect(items=[i]) for i in items)]
-        gap = self.rb_gap(items)
-        placements = layouts.flow(sizes, gap)
-        if anchor:
-            topleft = QtCore.QPointF(anchor.right() + gap * 4, anchor.top())
-            self.rb_place(items, placements, topleft=topleft)
-        else:
-            self.rb_place(items, placements, center=self.mapToScene(
-                self.get_view_center()))
-
     def rb_handle_drop(self, urls):
-        """Dropped PureRef boards and Are.na links get imported.
+        """Dropped PureRef boards get imported and dropped folders add
+        their images (with source links from a links.txt beside them).
         Returns True if the drop was handled."""
-        first = urls[0]
-        if first.isLocalFile():
-            path = first.toLocalFile()
-            if path.lower().endswith('.pur'):
-                self.rb_import_pureref(os.path.normpath(path))
-                return True
-            return False
-        url = first.toString()
-        if arena.is_arena_url(url) and not url.lower().split('?')[0].endswith(
-                ('.jpg', '.jpeg', '.png', '.gif', '.webp')):
-            existing = self.scene.itemsBoundingRect()
-            self.rb_start_arena(
-                [(url, None if existing.isNull() else existing)],
-                self.settings.valueOrDefault('Arena/max_side'), set(),
-                'Importing from Are.na…')
+        local = [u.toLocalFile() for u in urls if u.isLocalFile()]
+        if local and local[0].lower().endswith('.pur'):
+            self.rb_import_pureref(os.path.normpath(local[0]))
             return True
-        return False
+        folders = [p for p in local if os.path.isdir(p)]
+        if not folders:
+            return False
+        files = [p for p in local if os.path.isfile(p)]
+        for folder in folders:
+            files += sidecar.images_in(folder)
+        if not files:
+            self.rb_notify('no images in that folder')
+            return True
+        self.do_insert_images(
+            [QtCore.QUrl.fromLocalFile(f) for f in files])
+        return True
 
     # ---------- PureRef ----------
 

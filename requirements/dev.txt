@@ -4,5 +4,3 @@
 -r build.txt
 
 flake8==7.0.0
-pybadges==3.0.1
-yamllint==1.35.1

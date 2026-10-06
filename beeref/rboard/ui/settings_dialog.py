@@ -6,7 +6,7 @@
 # (at your option) any later version.
 
 """The settings window: themes (presets and custom), board, tools,
-imports, keyboard and mouse."""
+keyboard and mouse."""
 
 import os
 import re
@@ -22,8 +22,7 @@ from beeref.rboard.ui.menu import section_font
 from beeref.rboard.ui.theme import px, tm
 
 
-SECTIONS = ['appearance', 'board', 'tools', 'content', 'imports',
-            'keyboard & mouse']
+SECTIONS = ['appearance', 'board', 'tools', 'content', 'keyboard & mouse']
 
 
 def section_label(text):
@@ -593,14 +592,6 @@ class SettingsDialog(QtWidgets.QDialog):
                 s, 'Items/value_study_levels', 2, 8)),
         )))
         self.pages.addWidget(self.scrolled(ContentPage(view, s)))
-        self.pages.addWidget(self.scrolled(page(
-            section_label('Are.na'),
-            FieldRow('image size', setting_combo(
-                s, 'Arena/max_side',
-                [('full resolution', 0), ('up to 4096 px', 4096),
-                 ('up to 2048 px', 2048), ('up to 1024 px', 1024)]),
-                'big channels at full resolution use a lot of memory'),
-        )))
         keys = QtWidgets.QPushButton('edit keyboard & mouse controls')
         keys.clicked.connect(self.open_controls)
         folder = QtWidgets.QPushButton('open settings folder')

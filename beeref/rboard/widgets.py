@@ -10,68 +10,6 @@
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
-from beeref.rboard import arena
-
-
-SIZE_CHOICES = [
-    ('Full resolution', 0),
-    ('Up to 4096 px', 4096),
-    ('Up to 2048 px (recommended)', 2048),
-    ('Up to 1024 px', 1024),
-]
-
-
-class ArenaImportDialog(QtWidgets.QDialog):
-    """Ask for an Are.na link and an image size cap."""
-
-    def __init__(self, parent, settings):
-        super().__init__(parent)
-        self.settings = settings
-        self.setWindowTitle('Import from Are.na')
-        layout = QtWidgets.QFormLayout(self)
-
-        self.url = QtWidgets.QLineEdit()
-        self.url.setPlaceholderText('https://www.are.na/user/channel')
-        self.url.setMinimumWidth(420)
-        clip = QtWidgets.QApplication.clipboard().text().strip()
-        if arena.is_arena_url(clip):
-            self.url.setText(clip)
-        layout.addRow('Channel or block link:', self.url)
-
-        self.size = QtWidgets.QComboBox()
-        current = settings.valueOrDefault('Arena/max_side')
-        for label, value in SIZE_CHOICES:
-            self.size.addItem(label, value)
-            if value == current:
-                self.size.setCurrentIndex(self.size.count() - 1)
-        layout.addRow('Image size:', self.size)
-
-        note = QtWidgets.QLabel(
-            'Big channels at full resolution can use a lot of memory.')
-        note.setStyleSheet('color: gray')
-        layout.addRow(note)
-
-        self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok
-            | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.button(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok).setText('Import')
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-        layout.addRow(self.buttons)
-        self.url.textChanged.connect(self.validate)
-        self.validate()
-
-    def validate(self):
-        self.buttons.button(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(
-                arena.is_arena_url(self.url.text()))
-
-    def values(self):
-        max_side = self.size.currentData()
-        self.settings.setValue('Arena/max_side', max_side)
-        return self.url.text().strip(), max_side
-
 
 class ColorButton(QtWidgets.QPushButton):
     color_changed = QtCore.pyqtSignal(QtGui.QColor)

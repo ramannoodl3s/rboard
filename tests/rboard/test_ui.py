@@ -5,7 +5,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from beeref.fileio.sql import SQLiteIO
 from beeref.items import BeePixmapItem
-from beeref.rboard import attributes, links, pen
+from beeref.rboard import attributes, links, pen, subboards
 from beeref.rboard.subboards import SUBBOARD_DISABLED
 from beeref.rboard.ui import icons, theme as T
 from beeref.rboard.ui.menu import SectionLabel, OverlayMenu, clean_label
@@ -480,3 +480,83 @@ def test_interface_scale_and_font(settings, qapp, tmp_path):
     settings.setValue('Appearance/font_file', '')
     T.load_custom_font()
     assert T._custom['family'] is None
+
+
+# ---------- sub board queries, keeping boards ----------
+
+def test_query_include_and_exclude(view):
+    red, red2, blue = add_images(view, [
+        ('#e02020', 60, 40), ('#e02020', 40, 60), ('#2040d0', 60, 40)])
+    view.rb_analyze(view.rb_images())
+    view.rb_add_tag([red, blue], 'mine')
+    images = view.rb_images()
+    rule = {'include': ['mine'], 'exclude': ['blue'], 'mode': 'all'}
+    assert subboards.query_matches(rule, images) == [red]
+    rule = {'include': ['red', 'mine'], 'exclude': [], 'mode': 'any'}
+    assert subboards.query_matches(rule, images) == [red, red2, blue]
+    rule = {'include': [], 'exclude': ['portrait'], 'mode': 'all'}
+    assert subboards.query_matches(rule, images) == [red, blue]
+    # Unknown words without the content model match nothing
+    rule = {'include': ['nighttime'], 'exclude': [], 'mode': 'all'}
+    assert subboards.query_matches(rule, images, by_meaning=False) == []
+
+
+def test_new_subboard_dialog(view):
+    add_images(view, [('#e02020', 60, 40), ('#2040d0', 60, 40)])
+    from beeref.rboard.ui.subboard_dialog import SubBoardDialog
+    view.rb_analyze(view.rb_images())
+    dialog = SubBoardDialog(view, view.rb_images(), by_meaning=False)
+    dialog.include.setText('red, ')
+    dialog.update_count()
+    assert dialog.count.text() == '1 image match'
+    assert dialog.title() == 'red'
+    dialog.exclude.setText('red')
+    dialog.update_count()
+    assert not dialog.ok.isEnabled()
+
+
+def test_kept_boards_and_trees_come_back(view, tmp_path):
+    a, b, c = add_images(view, [('#e02020', 60, 40), ('#e02020', 60, 40),
+                                ('#2040d0', 60, 40)])
+    view.rb_analyze(view.rb_images())
+    view.rb_add_link(a, c)
+    query = view.subboards.open_query(
+        'red', {'include': ['red'], 'exclude': [], 'mode': 'all'},
+        view.rb_images())
+    view.rb_keep_board(query, True)
+    assert not view.undo_stack.isClean()
+    view.rb_open_link_tree(a)
+    scratch = view.subboards.open_attribute('color:blue', 'blue',
+                                            view.rb_images())
+    for board in list(view.subboards.boards):
+        board.window.close()
+    data = view.subboards.snapshot()
+    assert [d['title'] for d in data] == ['red', 'links · 0.png']
+    assert scratch not in [d['title'] for d in data]
+    # Reload: kept boards come back closed, with their layouts
+    view.subboards.clear()
+    view.subboards.restore(data, view.rb_images())
+    boards = view.subboards.boards
+    assert [b.title for b in boards] == ['red', 'links · 0.png']
+    assert boards[0].saved and boards[0].sources == [a, b]
+    assert boards[1].is_tree and set(boards[1].sources) == {a, c}
+    view.subboards.show(boards[0])
+    assert len(boards[0].window.view.rb_images()) == 2
+    boards[0].window.close()
+    # Discarding closed boards leaves kept ones alone
+    view.subboards.discard_cached()
+    assert len(view.subboards.boards) == 2
+
+
+def test_layers_menu_lists_boards(view):
+    add_images(view, [('#e02020', 60, 40)])
+    view.rb_analyze(view.rb_images())
+    view.subboards.open_query('all', {'include': [], 'exclude': [],
+                                      'mode': 'all'}, view.rb_images())
+    labels = [r.label for r in OverlayMenu(view, view.rb_menu_layers()).rows]
+    assert 'new sub board…' in labels and 'all' in labels
+    board = view.subboards.boards[0]
+    sub = [r.label for r in OverlayMenu(
+        view, view.rb_board_entries(board)).rows]
+    assert sub[:2] == ['open', 'keep in this board file']
+    board.window.close()

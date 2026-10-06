@@ -433,9 +433,10 @@ class BeeGraphicsView(MainControlsMixin,
         else:
             self.filename = filename
             self.scene.add_queued_items()
-            if not self.rb_restore_view(
-                    getattr(self.scene, 'loaded_board_data', {})):
+            data = getattr(self.scene, 'loaded_board_data', {})
+            if not self.rb_restore_view(data):
                 self.on_action_fit_scene()
+            self.subboards.restore(data.get('subboards'), self.rb_images())
             self.rb_after_images_added()
 
     def on_action_open_recent_file(self, filename):

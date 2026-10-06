@@ -134,6 +134,9 @@ class SubBoardWindow(QtWidgets.QMainWindow):
                 scene.addItem(item)
             for text, x, y, scale in self.board.headers:
                 self.add_header(text, x, y, scale)
+            placed = {id(entry[0]) for entry in self.board.layout}
+            self.place_after([s for s in self.board.sources
+                              if id(s) in live and id(s) not in placed])
         elif self.board.sections:
             self.populate_sections(live)
         elif self.board.rows:
@@ -157,6 +160,25 @@ class SubBoardWindow(QtWidgets.QMainWindow):
         self.view.undo_stack.clear()
         self.view.update_window_title()
         QtCore.QTimer.singleShot(0, self.view.on_action_fit_scene)
+
+    def place_after(self, sources):
+        """Add images in a row below what's on the board already."""
+        if not sources:
+            return
+        scene = self.view.scene
+        bottom = scene.itemsBoundingRect().bottom() if scene.items() else 0
+        items = []
+        for source in sources:
+            item = linked_copy(source)
+            scene.addItem(item)
+            items.append(item)
+        gap = self.view.rb_gap(items)
+        for item, (x, y, factor) in zip(
+                items, initial_placements(items, scene, gap)):
+            item.setScale(item.scale() * factor)
+            rect = scene.itemsBoundingRect(items=[item])
+            item.setPos(item.pos() + QtCore.QPointF(x, bottom + gap * 4 + y)
+                        - rect.topLeft())
 
     def populate_sections(self, live):
         """Each section as its own block of justified rows under a

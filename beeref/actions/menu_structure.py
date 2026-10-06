@@ -82,8 +82,6 @@ menu_structure = [
             'insert_images',
             'insert_text',
             MENU_SEPARATOR,
-            'import_arena',
-            'sync_arena',
         ],
     },
     {
@@ -141,6 +139,7 @@ menu_structure = [
             'show_notes',
             'tag_images',
             'link_images',
+            'new_subboard',
             MENU_SEPARATOR,
             'extract_text',
             'index_text',

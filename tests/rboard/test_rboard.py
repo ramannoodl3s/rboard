@@ -11,7 +11,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from beeref import commands
 from beeref.fileio.sql import SQLiteIO
 from beeref.items import BeePixmapItem, BeeTextItem
-from beeref.rboard import analysis, arena, layouts, ocr, pureref
+from beeref.rboard import analysis, layouts, ocr, pureref
 from beeref.rboard.palette_item import BeePaletteItem
 
 
@@ -129,19 +129,24 @@ def test_reading_order_survives_relayout(name):
     assert layouts.reading_order(rects) == list(range(20))
 
 
-# ---------- Are.na helpers ----------
+# ---------- folders with links.txt ----------
 
-def test_arena_key_roundtrip():
-    key = '123/original_abc.jpg'
-    assert arena.decode_key(arena.image_url(key, 800)) == key
-    assert arena.decode_key('https://example.com/x.jpg') is None
-
-
-def test_arena_channel_url_normalised():
-    assert (arena.channel_url('http://are.na/someone/a-channel/?page=2')
-            == 'https://www.are.na/someone/a-channel')
-    assert arena.is_arena_url('https://www.are.na/block/1')
-    assert not arena.is_arena_url('https://example.com')
+def test_links_txt_gives_source_links(view, tmp_path):
+    from beeref.rboard import sidecar
+    solid('#336699').save(str(tmp_path / 'a.png'))
+    solid('#993366').save(str(tmp_path / 'b.png'))
+    (tmp_path / 'links.txt').write_text(
+        '# channel: https://www.are.na/x/chan\n'
+        'a.png\thttps://www.are.na/block/1\n', encoding='utf-8')
+    assert sidecar.images_in(str(tmp_path)) == [
+        str(tmp_path / 'a.png'), str(tmp_path / 'b.png')]
+    item = BeePixmapItem(solid('#336699'), str(tmp_path / 'a.png'))
+    sidecar.apply(item, str(tmp_path / 'a.png'))
+    assert item.meta['source_url'] == 'https://www.are.na/block/1'
+    assert item.meta['arena_channel'] == 'https://www.are.na/x/chan'
+    other = BeePixmapItem(solid('#993366'), str(tmp_path / 'b.png'))
+    sidecar.apply(other, str(tmp_path / 'b.png'))
+    assert 'source_url' not in other.meta
 
 
 # ---------- PureRef ----------
@@ -406,7 +411,7 @@ def test_extract_text_action(view, qtbot):
 
 
 def test_queued_items_keep_metadata(view):
-    # Are.na imports set metadata before the item is queued for adding
+    # Imports set metadata before the item is queued for adding
     item = BeePixmapItem(solid('#336699'), 'a.png')
     item.meta['arena_key'] = '1/original_x.jpg'
     view.scene.add_item_later({'item': item, 'type': 'pixmap'})

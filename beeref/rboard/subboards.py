@@ -13,9 +13,14 @@ pixmaps are implicitly shared, so nothing is decoded or copied) and its
 metadata dict, so notes, tags and pen marks show everywhere, while
 arranging, sorting and removing stay local to the sub board.
 
-Sub boards exist only in memory: closing a window caches its layout,
-and everything is discarded when the main board changes or the app
-closes.
+Closing a window caches its layout. Sub boards last for the session,
+except saved ones and link trees: those are kept in the board file
+(.brd) with their layouts and come back when it's opened.
+
+A sub board is made from one tag, a link tree, or a query: tags its
+images must have (all, or any) and tags they mustn't have. A query term
+that isn't a tag on the board is matched by meaning with the content
+model ("nighttime").
 """
 
 import itertools
@@ -33,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Actions that make no sense on a temporary board
 SUBBOARD_DISABLED = {
     'new_scene', 'open', 'save', 'save_as', 'quit', 'insert_images',
-    'insert_text', 'paste', 'import_arena', 'sync_arena', 'import_pureref',
+    'insert_text', 'paste', 'import_pureref',
 }
 
 _ids = itertools.count(1)
@@ -66,11 +71,22 @@ class SubBoard:
         self.headers = []         # cached [(text, x, y, scale)]
         self.sections = None      # [(title, sources)] to lay out apart
         self.rows = None          # [[sources]] for a link tree, top down
+        self.rule = None          # query: {'include', 'exclude', 'mode'}
+        self.saved = False        # kept in the board file
         self.window = None
 
     @property
     def state(self):
         return 'open' if self.window else 'cached'
+
+    @property
+    def is_tree(self):
+        return self.key.startswith('links:')
+
+    @property
+    def kept(self):
+        """Whether it's saved with the board (trees always are)."""
+        return self.saved or self.is_tree
 
     def depth(self):
         d, p = 0, self.parent
@@ -138,6 +154,96 @@ class SubBoardManager(QtCore.QObject):
         self.show(board)
         return board
 
+    def open_query(self, title, rule, candidates, parent=None):
+        """A sub board of the images matching a query (see
+        `query_matches`)."""
+        board = SubBoard(title, 'query:' + title, query_matches(
+            rule, candidates), parent)
+        board.rule = rule
+        self.boards.append(board)
+        self.show(board)
+        return board
+
+    # -- keeping boards in the board file --
+
+    def snapshot(self):
+        """The saved boards and trees, as data for the .brd file."""
+        from beeref.rboard import links
+        kept = [b for b in self.tree() if b.kept]
+        out = []
+        for board in kept:
+            if board.window:  # remember the open layout too
+                board.headers = board.window.header_snapshot()
+                board.layout = board.window.layout_snapshot()
+            entry = {
+                'title': board.title, 'key': board.key,
+                'saved': board.saved, 'rule': board.rule,
+                'sources': [links.uid(s) for s in self.live_sources(board)],
+                'parent': kept.index(board.parent)
+                if board.parent in kept else None,
+            }
+            if board.layout:
+                entry['layout'] = [[links.uid(src), x, y, sc, z]
+                                   for src, x, y, sc, z in board.layout
+                                   if src.scene() is self.main_view.scene]
+                entry['headers'] = [list(h) for h in board.headers]
+            if board.rows:
+                entry['rows'] = [[links.uid(s) for s in row]
+                                 for row in board.rows]
+            if board.sections:
+                entry['sections'] = [[t, [links.uid(s) for s in srcs]]
+                                     for t, srcs in board.sections]
+            out.append(entry)
+        return out
+
+    def restore(self, entries, images):
+        """Bring back saved boards and trees (closed, ready to open)."""
+        from beeref.rboard import links
+        index = links.by_uid(images)
+
+        def items(uids):
+            return [index[u] for u in uids if u in index]
+
+        made = []
+        for entry in entries or []:
+            try:
+                parent = made[entry['parent']] \
+                    if entry.get('parent') is not None else None
+                board = SubBoard(entry['title'], entry['key'],
+                                 items(entry['sources']), parent)
+                board.saved = bool(entry.get('saved'))
+                board.rule = entry.get('rule')
+                if board.rule:  # queries pick up new matching images
+                    board.sources = query_matches(board.rule, images)
+                if entry.get('layout'):
+                    board.layout = [(index[u], x, y, sc, z)
+                                    for u, x, y, sc, z in entry['layout']
+                                    if u in index]
+                    board.headers = [tuple(h) for h in
+                                     entry.get('headers', [])]
+                if entry.get('rows'):
+                    board.rows = [items(r) for r in entry['rows']]
+                if entry.get('sections'):
+                    board.sections = [(t, items(u))
+                                      for t, u in entry['sections']]
+            except (KeyError, TypeError, ValueError, IndexError):
+                logger.exception('Skipping a saved sub board')
+                made.append(None)
+                continue
+            made.append(board)
+            if board.sources:
+                self.boards.append(board)
+        self.changed.emit()
+
+    def add(self, board):
+        if board not in self.boards:
+            self.boards.append(board)
+            self.changed.emit()
+
+    def set_saved(self, board, saved):
+        board.saved = saved
+        self.changed.emit()
+
     @staticmethod
     def tag_suggestions(tag, candidates, tagged):
         """Untagged images the content model thinks fit a custom tag, by
@@ -191,7 +297,8 @@ class SubBoardManager(QtCore.QObject):
                 board.window.close()
 
     def discard_cached(self):
-        for board in [b for b in self.boards if not b.window]:
+        for board in [b for b in self.boards
+                      if not b.window and not b.kept]:
             if board in self.boards:
                 self.discard(board)
 
@@ -219,6 +326,71 @@ class SubBoardManager(QtCore.QObject):
             if board.window:
                 board.window.view.scene.update()
         self.main_view.scene.update()
+
+
+class ManagerChange(QtGui.QUndoCommand):
+    """An undoable change to the sub boards kept in the board file, so
+    keeping or removing one marks the board as changed."""
+
+    def __init__(self, text, do, undo):
+        super().__init__(text)
+        self.do = do
+        self.undo_ = undo
+
+    def redo(self):
+        self.do()
+
+    def undo(self):
+        self.undo_()
+
+
+def term_index(images):
+    """{tag name (lower case): set of attribute keys} over images."""
+    out = {}
+    for item in images:
+        for key, label, *_ in attributes.attributes(item):
+            out.setdefault(label.lower(), set()).add(key)
+            out.setdefault(key.lower(), set()).add(key)
+    return out
+
+
+def term_matches(term, images, index=None, by_meaning=True):
+    """Images having a tag called `term`; terms that aren't tags on the
+    board are matched by meaning, when the content model can."""
+    term = ' '.join(term.lower().split())
+    index = term_index(images) if index is None else index
+    keys = index.get(term)
+    if keys:
+        return [i for i in images if attributes.keys_of(i) & keys]
+    if not by_meaning:
+        return []
+    from beeref.rboard import semantic
+    if not semantic.installed('text') or not any(
+            semantic.vector(i) is not None for i in images):
+        return []
+    try:
+        return semantic.matches_label(term, images)
+    except Exception:
+        logger.exception('Matching by meaning failed')
+        return []
+
+
+def query_matches(rule, images, by_meaning=True):
+    """Images with all (or any, mode 'any') of rule['include'] and none of
+    rule['exclude']. No include terms means every image."""
+    index = term_index(images)
+    include = [t for t in rule.get('include', []) if t.strip()]
+    exclude = [t for t in rule.get('exclude', []) if t.strip()]
+    if include:
+        sets = [set(map(id, term_matches(t, images, index, by_meaning)))
+                for t in include]
+        keep = (set.union(*sets) if rule.get('mode') == 'any'
+                else set.intersection(*sets))
+    else:
+        keep = set(map(id, images))
+    for term in exclude:
+        keep -= set(map(id, term_matches(term, images, index, by_meaning)))
+    return [i for i in images if id(i) in keep]
 
 
 def initial_placements(items, scene, gap):
