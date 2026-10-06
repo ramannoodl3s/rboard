@@ -545,6 +545,17 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def add_queued_items(self):
         """Adds items added via ``add_item_later``"""
 
+        # R Board: selecting each new item would announce the selection
+        # (and redraw the board) once per item; announce it once instead
+        blocked = self.blockSignals(True)
+        try:
+            self._add_queued_items()
+        finally:
+            self.blockSignals(blocked)
+        if self.selectedItems():
+            self.selectionChanged.emit()
+
+    def _add_queued_items(self):
         while not self.items_to_add.empty():
             data, selected = self.items_to_add.get()
             typ = data.pop('type')

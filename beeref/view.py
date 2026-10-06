@@ -801,7 +801,9 @@ class BeeGraphicsView(MainControlsMixin,
             item = self.scene.selectedItems(user_only=True)[0]
             grayscale = getattr(item, 'grayscale', False)
             self.bee_qactions['grayscale'].setChecked(grayscale)
-        self.viewport().repaint()
+        # R Board: update, not repaint, so a burst of selection changes
+        # draws the board once instead of once per change
+        self.viewport().update()
 
     def on_cursor_changed(self, cursor):
         if self.active_mode is None:
