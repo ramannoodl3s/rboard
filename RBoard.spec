@@ -11,6 +11,27 @@ from PyInstaller.utils.hooks import (
 from beeref import constants
 
 
+def use_current_cpp_runtime():
+    """PyQt6 ships an old Microsoft C++ runtime (14.26) that crashes ONNX
+    Runtime (the content model). Put Windows' current copy in its place
+    so the build (and the app it makes) uses the new one everywhere. The
+    runtime is backwards compatible and may be shipped with apps."""
+    import shutil
+    import PyQt6
+    qt_bin = join(os.path.dirname(PyQt6.__file__), 'Qt6', 'bin')
+    system = join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32')
+    for name in ('msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
+                 'vcruntime140.dll', 'vcruntime140_1.dll', 'concrt140.dll'):
+        bundled, current = join(qt_bin, name), join(system, name)
+        if os.path.isfile(bundled) and os.path.isfile(current) and \
+                os.path.getsize(bundled) != os.path.getsize(current):
+            if not os.path.exists(bundled + '.orig'):
+                shutil.copyfile(bundled, bundled + '.orig')
+            shutil.copyfile(current, bundled)
+
+
+use_current_cpp_runtime()
+
 a = Analysis(
     [join('beeref', '__main__.py')],
     pathex=[os.getcwd()],
