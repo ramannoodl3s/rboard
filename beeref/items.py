@@ -123,6 +123,10 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         self.init_selectable()
         self.settings = BeeSettings()
         self.grayscale = False
+        # R Board metadata saved with the item: source_url, arena_key,
+        # arena_channel, ocr_text, analysis (cached color statistics)
+        self.meta = {}
+        self._value_study_cache = None
 
     @classmethod
     def create_from_data(self, **kwargs):
@@ -133,6 +137,8 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             item.crop = QtCore.QRectF(*data['crop'])
         item.setOpacity(data.get('opacity', 1))
         item.grayscale = data.get('grayscale', False)
+        if 'rboard' in data:
+            item.meta = dict(data['rboard'])
         return item
 
     def __str__(self):
@@ -216,13 +222,35 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             return self.crop
 
     def get_extra_save_data(self):
-        return {'filename': self.filename,
+        data = {'filename': self.filename,
                 'opacity': self.opacity(),
                 'grayscale': self.grayscale,
                 'crop': [self.crop.topLeft().x(),
                          self.crop.topLeft().y(),
                          self.crop.width(),
                          self.crop.height()]}
+        if self.meta:
+            data['rboard'] = self.meta
+        return data
+
+    VALUE_STUDY_MAX_SIDE = 1024
+
+    def value_study_pixmap(self, levels):
+        """The image reduced to ``levels`` gray tones, cached per level
+        count. Computed at a capped resolution so toggling the value
+        study on a big board stays quick."""
+        if self._value_study_cache and self._value_study_cache[0] == levels:
+            return self._value_study_cache[1]
+        from beeref.rboard.analysis import posterize
+        pm = self.pixmap()
+        if max(pm.width(), pm.height()) > self.VALUE_STUDY_MAX_SIDE:
+            pm = pm.scaled(self.VALUE_STUDY_MAX_SIDE,
+                           self.VALUE_STUDY_MAX_SIDE,
+                           Qt.AspectRatioMode.KeepAspectRatio,
+                           Qt.TransformationMode.SmoothTransformation)
+        result = QtGui.QPixmap.fromImage(posterize(pm.toImage(), levels))
+        self._value_study_cache = (levels, result)
+        return result
 
     def get_filename_for_export(self, imgformat, save_id_default=None):
         save_id = self.save_id or save_id_default
@@ -270,6 +298,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
 
     def setPixmap(self, pixmap):
         super().setPixmap(pixmap)
+        self._value_study_cache = None
         self.reset_crop()
 
     def pixmap_from_bytes(self, data):
@@ -287,6 +316,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         item.setRotation(self.rotation())
         item.setOpacity(self.opacity())
         item.grayscale = self.grayscale
+        item.meta = dict(self.meta)
         if self.flip() == -1:
             item.do_flip()
         item.crop = self.crop
@@ -471,8 +501,26 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
                 self.draw_crop_rect(painter, handle())
             self.draw_crop_rect(painter, self.crop_temp)
         else:
-            pm = self._grayscale_pixmap if self.grayscale else self.pixmap()
-            painter.drawPixmap(self.crop, pm, self.crop)
+            levels = getattr(self.scene(), 'value_study_levels', 0)
+            if levels:
+                pm = self.value_study_pixmap(levels)
+                # The study pixmap may be downscaled; map the crop onto it
+                factor = pm.width() / max(self.pixmap().width(), 1)
+                source = QtCore.QRectF(
+                    self.crop.topLeft() * factor, self.crop.size() * factor)
+                painter.drawPixmap(self.crop, pm, source)
+            else:
+                pm = (self._grayscale_pixmap if self.grayscale
+                      else self.pixmap())
+                painter.drawPixmap(self.crop, pm, self.crop)
+            marks = self.meta.get('marks')
+            if marks:
+                from beeref.rboard.pen import paint_marks
+                painter.save()
+                painter.setClipRect(self.crop)
+                painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+                paint_marks(painter, marks)
+                painter.restore()
             self.paint_selectable(painter, option, widget)
 
     def enter_crop_mode(self):

@@ -26,7 +26,6 @@ from PyQt6 import QtCore, QtWidgets
 from beeref import constants
 from beeref.assets import BeeAssets
 from beeref.config import CommandlineArgs, BeeSettings, logfile_name
-from beeref.utils import create_palette_from_dict
 from beeref.view import BeeGraphicsView
 
 logger = logging.getLogger(__name__)
@@ -113,8 +112,8 @@ def main():
 
     os.environ["QT_DEBUG_PLUGINS"] = "1"
     app = BeeRefApplication(sys.argv)
-    palette = create_palette_from_dict(constants.COLORS)
-    app.setPalette(palette)
+    from beeref.rboard.ui.theme import tm
+    tm().load()  # Softclub theme: palette, stylesheet, font
     bee = BeeRefMainWindow(app)  # NOQA:F841
 
     signal.signal(signal.SIGINT, handle_sigint)

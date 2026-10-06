@@ -10,7 +10,7 @@ from beeref.view import BeeGraphicsView
 @patch('PyQt6.QtWidgets.QWidget.show')
 def test_beeref_mainwindow_init(show_mock, qapp):
     window = BeeRefMainWindow(qapp)
-    assert window.windowTitle() == 'BeeRef'
+    assert window.windowTitle() == 'R Board'
     assert BeeAssets().logo == BeeAssets().logo
     assert window.windowIcon()
     assert window.contentsMargins() == QtCore.QMargins(0, 0, 0, 0)

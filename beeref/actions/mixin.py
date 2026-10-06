@@ -34,6 +34,9 @@ class ActionsMixin:
         self.context_menu = QtWidgets.QMenu(self)
         self.toplevel_menus = []
         self.bee_actiongroups = defaultdict(list)
+        # Per-view actions; the shared registry (Action.qaction) always
+        # points at the main board's, since sub boards have their own
+        self.bee_qactions = {}
         self._post_create_functions = []
         self._create_actions()
         self._create_menu(self.context_menu, menu_structure)
@@ -69,6 +72,9 @@ class ActionsMixin:
 
     def _create_actions(self):
         for action in actions.values():
+            if action.callback is None:
+                # Dynamic entries (recent files) are built separately
+                continue
             qaction = QtGui.QAction(action.text, self)
             qaction.setAutoRepeat(False)
             shortcuts = action.get_shortcuts()
@@ -83,7 +89,9 @@ class ActionsMixin:
             if action.group:
                 self.bee_actiongroups[action.group].append(qaction)
                 qaction.setEnabled(False)
-            action.qaction = qaction
+            self.bee_qactions[action.id] = qaction
+            if not getattr(self, 'is_subboard', False):
+                action.qaction = qaction
 
     def _create_menu(self, menu, items):
         if isinstance(items, str):
@@ -91,7 +99,7 @@ class ActionsMixin:
             return menu
         for item in items:
             if isinstance(item, str):
-                menu.addAction(actions[item].qaction)
+                menu.addAction(self.bee_qactions[item])
             if item == MENU_SEPARATOR:
                 menu.addSeparator()
             if isinstance(item, dict):
@@ -105,6 +113,8 @@ class ActionsMixin:
     def _build_recent_files(self, menu=None):
         if menu:
             self._recent_files_submenu = menu
+        if getattr(self, 'is_subboard', False):
+            return
         self._clear_recent_files()
 
         files = self.settings.get_recent_files(existing_only=True)

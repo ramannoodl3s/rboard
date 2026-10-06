@@ -21,7 +21,7 @@ import os.path
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
-from beeref.actions import ActionsMixin, actions
+from beeref.actions import ActionsMixin
 from beeref import commands
 from beeref.config import CommandlineArgs, BeeSettings, KeyboardSettings
 from beeref import constants
@@ -31,6 +31,8 @@ from beeref.fileio.export import exporter_registry, ImagesToDirectoryExporter
 from beeref import widgets
 from beeref.items import BeePixmapItem, BeeTextItem
 from beeref.main_controls import MainControlsMixin
+from beeref.rboard.ui.board_ui import BoardUIMixin
+from beeref.rboard.view_mixin import RBoardMixin
 from beeref.scene import BeeGraphicsScene
 from beeref.utils import get_file_extension_from_format, qcolor_to_hex
 
@@ -40,12 +42,17 @@ logger = logging.getLogger(__name__)
 
 
 class BeeGraphicsView(MainControlsMixin,
+                      RBoardMixin,
+                      BoardUIMixin,
                       QtWidgets.QGraphicsView,
                       ActionsMixin):
 
     PAN_MODE = 1
     ZOOM_MODE = 2
     SAMPLE_COLOR_MODE = 3
+    PEN_MODE = 4
+
+    is_subboard = False  # R Board sub boards subclass this view
 
     def __init__(self, app, parent=None):
         super().__init__(parent)
@@ -83,14 +90,17 @@ class BeeGraphicsView(MainControlsMixin,
         self.init_main_controls(main_window=parent)
 
         # Load files given via command line
-        if commandline_args.filenames:
+        if commandline_args.filenames and not self.is_subboard:
             fn = commandline_args.filenames[0]
             if os.path.splitext(fn)[1] == '.bee':
                 self.open_from_file(fn)
+            elif os.path.splitext(fn)[1].lower() == '.pur':
+                self.rb_import_pureref(os.path.normpath(fn))
             else:
                 self.do_insert_images(commandline_args.filenames)
 
         self.update_window_title()
+        self.rb_init_ui()
 
     @property
     def filename(self):
@@ -154,7 +164,9 @@ class BeeGraphicsView(MainControlsMixin,
         self.update_window_title()
 
     def on_context_menu(self, point):
-        self.context_menu.exec(self.mapToGlobal(point))
+        # R Board: the home bar holds the full menu; right-click only
+        # shows a short menu, or the image menu on images
+        self.rb_context_menu(point)
 
     def get_supported_image_formats(self, cls):
         formats = []
@@ -171,6 +183,9 @@ class BeeGraphicsView(MainControlsMixin,
     def clear_scene(self):
         logging.debug('Clearing scene...')
         self.cancel_active_modes()
+        if getattr(self, 'subboards', None):
+            self.subboards.clear()
+        self.note_hover_item = None
         self.scene.clear()
         self.undo_stack.clear()
         self.filename = None
@@ -576,7 +591,8 @@ class BeeGraphicsView(MainControlsMixin,
             self.app.quit()
 
     def on_action_settings(self):
-        widgets.settings.SettingsDialog(self)
+        from beeref.rboard.ui.settings_dialog import SettingsDialog
+        SettingsDialog(self)
 
     def on_action_keyboard_settings(self):
         widgets.controls.ControlsDialog(self)
@@ -728,7 +744,7 @@ class BeeGraphicsView(MainControlsMixin,
         if self.scene.has_selection():
             item = self.scene.selectedItems(user_only=True)[0]
             grayscale = getattr(item, 'grayscale', False)
-            actions.actions['grayscale'].qaction.setChecked(grayscale)
+            self.bee_qactions['grayscale'].setChecked(grayscale)
         self.viewport().repaint()
 
     def on_cursor_changed(self, cursor):
@@ -858,6 +874,10 @@ class BeeGraphicsView(MainControlsMixin,
         if self.mousePressEventMainControls(event):
             return
 
+        if self.rb_pen_event(event, 'press'):
+            event.accept()
+            return
+
         if self.active_mode == self.SAMPLE_COLOR_MODE:
             if (event.button() == Qt.MouseButton.LeftButton):
                 color = self.scene.sample_color_at(
@@ -926,6 +946,10 @@ class BeeGraphicsView(MainControlsMixin,
             event.accept()
             return
 
+        if self.rb_pen_event(event, 'move'):
+            event.accept()
+            return
+
         if self.mouseMoveEventMainControls(event):
             return
         super().mouseMoveEvent(event)
@@ -941,6 +965,9 @@ class BeeGraphicsView(MainControlsMixin,
             self.active_mode = None
             event.accept()
             return
+        if self.rb_pen_event(event, 'release'):
+            event.accept()
+            return
         if self.mouseReleaseEventMainControls(event):
             return
         super().mouseReleaseEvent(event)
@@ -949,8 +976,14 @@ class BeeGraphicsView(MainControlsMixin,
         super().resizeEvent(event)
         self.recalc_scene_rect()
         self.welcome_overlay.resize(self.size())
+        self.rb_on_resize()
 
     def keyPressEvent(self, event):
+        if (getattr(self, 'pen_active', False)
+                and event.key() == Qt.Key.Key_Escape):
+            self.bee_qactions['pen_mode'].setChecked(False)
+            event.accept()
+            return
         if self.keyPressEventMainControls(event):
             return
         if self.active_mode == self.SAMPLE_COLOR_MODE:

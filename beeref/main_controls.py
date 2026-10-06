@@ -94,6 +94,8 @@ class MainControlsMixin:
                             round(event.position().y()))
         if mimedata.hasUrls():
             logger.debug(f'Found dropped urls: {mimedata.urls()}')
+            if self.control_target.rb_handle_drop(mimedata.urls()):
+                return
             if not self.control_target.scene.items():
                 # Check if we have a bee file we can open directly
                 path = mimedata.urls()[0]

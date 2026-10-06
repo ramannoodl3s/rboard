@@ -29,7 +29,7 @@ def test_init_without_filenames(open_file_mock, qapp, commandline_args):
     parent = QtWidgets.QMainWindow()
     view = BeeGraphicsView(qapp, parent)
     open_file_mock.assert_not_called()
-    assert view.parent.windowTitle() == 'BeeRef'
+    assert view.parent.windowTitle() == 'R Board'
     del view
 
 
@@ -93,7 +93,7 @@ def test_clear_scene(view, item):
     assert view.transform().isIdentity()
     assert view.filename is None
     view.undo_stack.clear.assert_called_once_with()
-    assert view.parent.windowTitle() == 'BeeRef'
+    assert view.parent.windowTitle() == 'R Board'
 
 
 def test_reset_previous_transform_when_other_item(view):
@@ -588,7 +588,7 @@ def test_on_action_quit_when_unsaved_changes_confirmed(
     quit_mock.assert_called_once_with()
 
 
-@patch('beeref.widgets.settings.SettingsDialog.show')
+@patch('beeref.rboard.ui.settings_dialog.SettingsDialog.show')
 def test_on_action_settings(show_mock, view):
     view.on_action_settings()
     show_mock.assert_called_once()
@@ -1100,28 +1100,28 @@ def test_cancel_sample_color_mode_when_multi_selection(view, item):
 def test_update_window_title_no_changes_no_filename(clear_mock, view):
     view.filename = None
     view.update_window_title()
-    assert view.parent.windowTitle() == 'BeeRef'
+    assert view.parent.windowTitle() == 'R Board'
 
 
 @patch('PyQt6.QtGui.QUndoStack.isClean', return_value=False)
 def test_update_window_title_changes_no_filename(clear_mock, view):
     view.filename = None
     view.update_window_title()
-    assert view.parent.windowTitle() == '[Untitled]* - BeeRef'
+    assert view.parent.windowTitle() == '[Untitled]* - R Board'
 
 
 @patch('PyQt6.QtGui.QUndoStack.isClean', return_value=True)
 def test_update_window_title_no_changes_filename(clear_mock, view):
     view.filename = 'test.bee'
     view.update_window_title()
-    assert view.parent.windowTitle() == 'test.bee - BeeRef'
+    assert view.parent.windowTitle() == 'test.bee - R Board'
 
 
 @patch('PyQt6.QtGui.QUndoStack.isClean', return_value=False)
 def test_update_window_title_changes_filename(clear_mock, view):
     view.filename = 'test.bee'
     view.update_window_title()
-    assert view.parent.windowTitle() == 'test.bee* - BeeRef'
+    assert view.parent.windowTitle() == 'test.bee* - R Board'
 
 
 @patch('beeref.view.BeeGraphicsView.recalc_scene_rect')

@@ -26,6 +26,7 @@ import rpack
 from beeref import commands
 from beeref.config import BeeSettings
 from beeref.items import item_registry, BeeErrorItem, sort_by_filename
+from beeref.rboard import palette_item, pen  # noqa: F401 (item types)
 from beeref.selection import MultiSelectItem, RubberbandItem
 
 
@@ -51,6 +52,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.items_to_add = Queue()
         self.edit_item = None
         self.crop_item = None
+        self.value_study_levels = 0  # 0 = off
         self.settings = BeeSettings()
         self.clear()
         self._clear_ongoing = False

@@ -136,7 +136,45 @@ class BeeSettings(QtCore.QSettings):
             'cast': int,
             'validate': lambda x: x >= 0,
             'post_save_callback': QtGui.QImageReader.setAllocationLimit,
-        }
+        },
+        'Items/value_study_levels': {
+            'default': 4,
+            'cast': int,
+            'validate': lambda x: 2 <= x <= 8,
+        },
+        'Items/palette_size': {
+            'default': 8,
+            'cast': int,
+            'validate': lambda x: 2 <= x <= 24,
+        },
+        'Appearance/bar_hide_delay': {
+            # Seconds before the home bar fades out; 0 = always visible
+            'default': 2.0,
+            'cast': float,
+            'validate': lambda x: 0 <= x <= 60,
+        },
+        'Appearance/show_notes': {
+            'default': False,
+            'cast': lambda x: x in (True, 'true', '1', 1),
+        },
+        'Pen/color': {
+            'default': '#d24b3c',
+            'validate': lambda x: isinstance(x, str) and x.startswith('#'),
+        },
+        'Pen/width': {
+            'default': 'medium',
+            'validate': lambda x: x in ('thin', 'medium', 'thick'),
+        },
+        'Pen/tool': {
+            'default': 'free',
+            'validate': lambda x: x in ('free', 'circle', 'arrow', 'eraser'),
+        },
+        'Arena/max_side': {
+            # Longest image side for Are.na imports; 0 = full resolution
+            'default': 2048,
+            'cast': int,
+            'validate': lambda x: x in (0, 1024, 2048, 4096),
+        },
     }
 
     def __init__(self):

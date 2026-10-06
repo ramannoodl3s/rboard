@@ -297,6 +297,57 @@ class ArrangeItems(QtGui.QUndoCommand):
             item.setPos(pos)
 
 
+class ArrangeScaleItems(QtGui.QUndoCommand):
+    """Scale items by the given factors, then move their bounding rects'
+    top-left corners to the given positions."""
+
+    def __init__(self, scene, items, positions, factors):
+        super().__init__('Arrange items')
+        self.scene = scene
+        self.items = items
+        self.positions = positions
+        self.factors = factors
+
+    def redo(self):
+        self.old = [(item.pos(), item.scale()) for item in self.items]
+        for item, pos, factor in zip(self.items, self.positions,
+                                     self.factors):
+            item.setScale(item.scale() * factor)
+            orig_topleft = item.mapToScene(QtCore.QPointF(0, 0))
+            rect_topleft = self.scene.itemsBoundingRect(
+                items=[item]).topLeft()
+            item.setPos(pos + orig_topleft - rect_topleft)
+
+    def undo(self):
+        for item, (pos, scale) in zip(self.items, self.old):
+            item.setScale(scale)
+            item.setPos(pos)
+
+
+class SetItemMeta(QtGui.QUndoCommand):
+    """Set one R Board metadata key on several items."""
+
+    def __init__(self, items, key, values, text='Change item data'):
+        super().__init__(text)
+        self.items = items
+        self.key = key
+        self.values = values
+        self.missing = object()
+
+    def redo(self):
+        self.old = [item.meta.get(self.key, self.missing)
+                    for item in self.items]
+        for item, value in zip(self.items, self.values):
+            item.meta[self.key] = value
+
+    def undo(self):
+        for item, value in zip(self.items, self.old):
+            if value is self.missing:
+                item.meta.pop(self.key, None)
+            else:
+                item.meta[self.key] = value
+
+
 class CropItem(QtGui.QUndoCommand):
     def __init__(self, item, crop):
         super().__init__('Crop item')
