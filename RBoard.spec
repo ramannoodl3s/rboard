@@ -5,8 +5,7 @@
 import os
 from os.path import join
 
-from PyInstaller.utils.hooks import (
-    collect_data_files, collect_dynamic_libs, collect_submodules)
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 from beeref import constants
 
@@ -32,20 +31,44 @@ def use_current_cpp_runtime():
 
 use_current_cpp_runtime()
 
+
+def standard_library():
+    """All of Python's standard library, so plugins can use any of it
+    (the build otherwise only keeps what R Board itself imports)."""
+    import sys
+    from importlib.util import find_spec
+    skip = {'tkinter', 'turtle', 'turtledemo', 'idlelib', 'test',
+            'lib2to3', 'ensurepip', 'venv', 'distutils', 'pydoc_data',
+            'msilib', 'antigravity', 'this', '__phello__', 'curses'}
+    names = []
+    for name in sorted(sys.stdlib_module_names - skip):
+        try:
+            if find_spec(name) is None:
+                continue
+        except (ImportError, ValueError):
+            continue
+        names += collect_submodules(
+            name, filter=lambda n: not any(
+                part in ('test', 'tests', 'idle_test')
+                for part in n.split('.')))
+    return names
+
 a = Analysis(
     [join('beeref', '__main__.py')],
     pathex=[os.getcwd()],
-    binaries=collect_dynamic_libs('onnxruntime'),
+    binaries=[],
     datas=collect_data_files('beeref', includes=[
         '**/*.html', '**/*.png', '**/*.json', '**/*.npz', '**/*.ico']),
     hiddenimports=(collect_submodules('winrt')
                    + collect_submodules('beeref')
-                   + ['onnxruntime', 'tokenizers']),
+                   + standard_library()),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Developer tools that come along with the dependencies otherwise
-    excludes=['tkinter', 'pytest', 'IPython', 'matplotlib', 'playwright'],
+    # Developer tools that come along with the dependencies otherwise,
+    # and the AI libraries, which come in the AI features plugin
+    excludes=['tkinter', 'pytest', 'IPython', 'matplotlib', 'playwright',
+              'onnxruntime', 'tokenizers', 'huggingface_hub'],
     noarchive=False)
 
 pyz = PYZ(a.pure)

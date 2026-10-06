@@ -333,11 +333,19 @@ class BoardUIMixin:
         ]
 
     def rb_menu_add(self):
-        return [
+        from beeref.rboard.ui import plugins_ui
+        entries = [
             ('action', 'insert_images', 'images…'),
             ('action', 'insert_text', 'text'),
             ('action', 'paste', 'paste'),
         ]
+        extra = plugins_ui.menu_entries(self)
+        return entries + [('sep',)] + extra if extra else entries
+
+    def _build_plugins_menu(self, menu):
+        from beeref.rboard.ui import plugins_ui
+        plugins_ui.fill_menu(self, menu)
+        menu.aboutToShow.connect(lambda: plugins_ui.fill_menu(self, menu))
 
     def rb_menu_arrange(self):
         return [
@@ -491,6 +499,8 @@ class BoardUIMixin:
     def rb_menu_settings(self):
         return [
             ('action', 'settings', 'settings…'),
+            ('item', 'plugins…',
+             lambda: self.on_action_settings(page='plugins')),
             ('action', 'keyboard_settings', 'keyboard & mouse…'),
             ('sep',),
             ('action', 'help', 'help'),
@@ -914,9 +924,9 @@ class BoardUIMixin:
         if ok and tag:
             self.rb_add_tag(images, tag)
 
-    def on_action_settings(self):
+    def on_action_settings(self, page=None):
         from beeref.rboard.ui.settings_dialog import SettingsDialog
-        SettingsDialog(self)
+        SettingsDialog(self, page if isinstance(page, str) else None)
 
     # ---------- note callouts ----------
 

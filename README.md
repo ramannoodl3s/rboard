@@ -18,5 +18,6 @@ What it does that PureRef doesn't:
 - **Find by colour** and **select duplicates**
 - **Export a selection** as one image, laid out as on the board
 - Opens **PureRef boards** (.pur) and BeeRef boards (.bee)
+- **Plugins**: the AI features (tags, search by meaning, group by content) are a one-time install from inside the app
 
 Based on [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu.

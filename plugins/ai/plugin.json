@@ -1,0 +1,9 @@
+{
+  "id": "ai",
+  "name": "AI features",
+  "version": "0.3.0",
+  "api": 1,
+  "python": "cp311",
+  "module": "rboard_ai",
+  "description": "kind, mood, style and subject tags, search by meaning, group by content and tag suggestions. runs OpenAI's CLIP on this computer with ONNX Runtime."
+}

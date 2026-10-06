@@ -643,9 +643,9 @@ class BeeGraphicsView(MainControlsMixin,
             logger.info('User quit. Exiting...')
             self.app.quit()
 
-    def on_action_settings(self):
+    def on_action_settings(self, page=None):
         from beeref.rboard.ui.settings_dialog import SettingsDialog
-        SettingsDialog(self)
+        SettingsDialog(self, page if isinstance(page, str) else None)
 
     def on_action_keyboard_settings(self):
         widgets.controls.ControlsDialog(self)

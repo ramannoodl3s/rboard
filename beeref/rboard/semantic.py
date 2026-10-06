@@ -29,7 +29,6 @@ board file. Tags come in groups:
 import base64
 import logging
 import os
-import threading
 import urllib.request
 
 import numpy as np
@@ -150,11 +149,28 @@ def part_size(part):
     return sum(size for _, size in PARTS[part])
 
 
-def installed(part):
+def models_installed(part):
     base = model_dir()
     return all(os.path.isfile(os.path.join(base, f))
                and os.path.getsize(os.path.join(base, f)) == size
                for f, size in PARTS[part])
+
+
+def engine():
+    """The AI features plugin's engine, or None if it isn't installed."""
+    from beeref.rboard import plugins
+    plugins.ensure(plugins.AI_ID)
+    return plugins.services.get('ai')
+
+
+def installed(part):
+    """Whether this model part can run: the plugin and its files."""
+    return models_installed(part) and engine() is not None
+
+
+def ready():
+    """Everything the AI features need is installed."""
+    return all(installed(part) for part in PARTS)
 
 
 def download(part, on_progress=None, is_canceled=lambda: False):
@@ -201,73 +217,46 @@ def remove_models():
 # ---------- model ----------
 
 class Clip:
-    """Lazily loaded ONNX sessions, shared by the whole app."""
+    """The models, run by the AI features plugin."""
 
-    _lock = threading.Lock()
-    _vision = None
-    _text = None
-    _tokenizer = None
     _text_cache = {}
 
     @classmethod
     def reset(cls):
-        with cls._lock:
-            cls._vision = cls._text = cls._tokenizer = None
-            cls._text_cache = {}
+        cls._text_cache = {}
+        ai = engine()
+        if ai:
+            ai.reset()
 
     @classmethod
-    def _session(cls, path):
-        import onnxruntime as ort
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = max(1, (os.cpu_count() or 2) - 1)
-        return ort.InferenceSession(path, options,
-                                    providers=['CPUExecutionProvider'])
-
-    @classmethod
-    def vision(cls):
-        with cls._lock:
-            if cls._vision is None:
-                if not installed('vision'):
-                    raise SemanticError('The image model is not installed')
-                cls._vision = cls._session(os.path.join(
-                    model_dir(), PARTS['vision'][0][0]))
-            return cls._vision
-
-    @classmethod
-    def text(cls):
-        with cls._lock:
-            if cls._text is None:
-                if not installed('text'):
-                    raise SemanticError('The text model is not installed')
-                from tokenizers import Tokenizer
-                cls._tokenizer = Tokenizer.from_file(
-                    os.path.join(model_dir(), 'tokenizer.json'))
-                cls._text = cls._session(os.path.join(
-                    model_dir(), PARTS['text'][0][0]))
-            return cls._text, cls._tokenizer
+    def _engine(cls, part):
+        ai = engine()
+        if ai is None:
+            raise SemanticError('AI features are not installed')
+        if not models_installed(part):
+            raise SemanticError(f'The {PART_NAMES[part]} is not installed')
+        return ai
 
     @classmethod
     def embed_images(cls, arrays, batch=16):
         """(N, 3, 224, 224) float32 -> (N, 512) unit vectors."""
-        session = cls.vision()
-        out = [session.run(None, {'pixel_values': arrays[i:i + batch]})[0]
-               for i in range(0, len(arrays), batch)]
-        return normalize(np.concatenate(out))
+        ai = cls._engine('vision')
+        path = os.path.join(model_dir(), PARTS['vision'][0][0])
+        return normalize(ai.embed_images(path, arrays, batch))
 
     @classmethod
     def embed_texts(cls, texts, templates=None):
         """Unit vectors for texts, each averaged over a few phrasings."""
-        session, tokenizer = cls.text()
+        ai = cls._engine('text')
+        model = os.path.join(model_dir(), PARTS['text'][0][0])
+        tokenizer = os.path.join(model_dir(), 'tokenizer.json')
         templates = tuple(templates or TEMPLATES)
         result = []
         for text in texts:
             key = (templates, text)
             if key not in cls._text_cache:
-                vecs = []
-                for template in templates:
-                    ids = tokenizer.encode(template.format(text)).ids[:77]
-                    vecs.append(session.run(None, {'input_ids': np.array(
-                        [ids], np.int64)})[0][0])
+                vecs = [ai.embed_text(model, tokenizer, t.format(text))
+                        for t in templates]
                 cls._text_cache[key] = normalize(
                     normalize(np.array(vecs)).mean(0))
             result.append(cls._text_cache[key])

@@ -5,7 +5,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-"""Content understanding in the app: model downloads, indexing images
+"""Content understanding in the app: the AI features install, indexing images
 (in the background once the model is installed), grouping by content,
 searching by meaning and custom-tag suggestions."""
 
@@ -54,19 +54,6 @@ def _run_index(count, worker):
             worker.batch_done.emit(b)
         worker.progress.emit(min((b + 1) * BATCH, count))
     worker.finished.emit('', errors)
-
-
-def _run_download(part, worker):
-    worker.begin_processing.emit(100)
-    try:
-        semantic.download(
-            part,
-            on_progress=lambda d, t: worker.progress.emit(int(d * 100 / t)),
-            is_canceled=lambda: worker.canceled)
-    except Exception as e:
-        worker.finished.emit('', [str(e)])
-        return
-    worker.finished.emit('', [])
 
 
 class GroupDialog(QtWidgets.QDialog):
@@ -123,41 +110,13 @@ class ContentMixin:
     # ---------- models ----------
 
     def rb_ensure_model(self, part, then):
-        """Run `then` once the model part is installed, asking to
-        download it first if needed."""
+        """Run `then` once the AI features are installed, offering the
+        one-time install first if needed."""
+        from beeref.rboard.ui.plugins_ui import install_ai
         if semantic.installed(part):
             then()
-            return
-        size = semantic.part_size(part) / 1e6
-        uses = {'vision': 'R Board uses it to understand what your images '
-                          'show (grouping, album covers, similar images).',
-                'text': 'R Board uses it to search images by meaning and '
-                        'to match custom tags by name.'}[part]
-        answer = QtWidgets.QMessageBox.question(
-            self, 'download model',
-            f'this needs the {semantic.PART_NAMES[part]} ({size:.0f} MB), '
-            f'downloaded once from huggingface.co. {uses} it runs on this '
-            'computer; nothing is uploaded.\n\ndownload it now?')
-        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-            return
-        worker = fileio.ThreadedIO(_run_download, part)
-
-        def finished(filename, errors):
-            if errors:
-                if 'canceled' not in errors[0]:
-                    QtWidgets.QMessageBox.warning(
-                        self, 'download model',
-                        f"couldn't download the model: {errors[0]}. check "
-                        'your connection and try again.')
-                return
-            then()
-
-        worker.finished.connect(finished)
-        self.download_worker = worker
-        self.progress = widgets.BeeProgressDialog(
-            f'downloading the {semantic.PART_NAMES[part]}…',
-            worker=worker, parent=self)
-        worker.start()
+        else:
+            install_ai(self, then)
 
     # ---------- indexing ----------
 

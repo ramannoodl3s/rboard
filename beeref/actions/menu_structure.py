@@ -147,6 +147,10 @@ menu_structure = [
         ],
     },
     {
+        'menu': '&Plugins',
+        'items': '_build_plugins_menu',
+    },
+    {
         'menu': '&Settings',
         'items': [
             'settings',

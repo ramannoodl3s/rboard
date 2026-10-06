@@ -51,6 +51,9 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         app.setOrganizationName(constants.APPNAME)
         app.setApplicationName(constants.APPNAME)
         self.setWindowIcon(BeeAssets().logo)
+        # R Board: plugins load before the view builds its menus
+        from beeref.rboard import plugins
+        plugins.load_all(self)
         self.view = BeeGraphicsView(app, self)
         default_window_size = QtCore.QSize(500, 300)
         geom = self.view.settings.value('MainWindow/geometry')

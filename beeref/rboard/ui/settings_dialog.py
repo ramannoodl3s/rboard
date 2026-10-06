@@ -6,7 +6,7 @@
 # (at your option) any later version.
 
 """The settings window: themes (presets and custom), board, tools,
-keyboard and mouse."""
+plugins, keyboard and mouse."""
 
 import os
 import re
@@ -22,7 +22,7 @@ from beeref.rboard.ui.menu import section_font
 from beeref.rboard.ui.theme import px, tm
 
 
-SECTIONS = ['appearance', 'board', 'tools', 'content', 'keyboard & mouse']
+SECTIONS = ['appearance', 'board', 'tools', 'plugins', 'keyboard & mouse']
 
 
 def section_label(text):
@@ -461,72 +461,9 @@ def page(*widgets):
     return w
 
 
-class ContentPage(QtWidgets.QWidget):
-    """The content model: what's installed, downloads, removal."""
-
-    def __init__(self, view, settings):
-        super().__init__()
-        from beeref.rboard import semantic
-        self.view = view
-        self.semantic = semantic
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        layout.addWidget(section_label('content model'))
-        layout.addWidget(caption(
-            'a small image model (OpenAI CLIP) that runs on this computer. '
-            'it powers group by content, album covers, similar images, '
-            'search by meaning and custom tag suggestions. it is '
-            'downloaded once from huggingface.co; nothing is uploaded.'))
-        self.rows = {}
-        for part in ('vision', 'text'):
-            status = QtWidgets.QLabel()
-            button = QtWidgets.QPushButton()
-            button.clicked.connect(lambda _, p=part: self.download(p))
-            row = QtWidgets.QWidget()
-            h = QtWidgets.QHBoxLayout(row)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.addWidget(status, 1)
-            h.addWidget(button)
-            layout.addWidget(FieldRow(semantic.PART_NAMES[part], row))
-            self.rows[part] = (status, button)
-        layout.addWidget(setting_check(
-            settings, 'Content/auto_index',
-            'read new images automatically once the image model is here'))
-        self.remove_button = QtWidgets.QPushButton('remove models')
-        self.remove_button.clicked.connect(self.remove)
-        layout.addWidget(self.remove_button)
-        layout.addStretch()
-        self.refresh()
-
-    def refresh(self):
-        any_installed = False
-        for part, (status, button) in self.rows.items():
-            size = self.semantic.part_size(part) / 1e6
-            ok = self.semantic.installed(part)
-            any_installed |= ok
-            status.setText(f'installed · {size:.0f} MB' if ok
-                           else f'not installed · {size:.0f} MB download')
-            button.setText('installed' if ok else 'download')
-            button.setEnabled(not ok)
-        self.remove_button.setEnabled(any_installed)
-
-    def download(self, part):
-        self.view.rb_ensure_model(part, self.refresh)
-
-    def remove(self):
-        answer = QtWidgets.QMessageBox.question(
-            self, 'remove models',
-            'remove the downloaded models? images that were already read '
-            'keep their results; new ones need the model again.')
-        if answer == QtWidgets.QMessageBox.StandardButton.Yes:
-            self.semantic.remove_models()
-            self.refresh()
-
-
 class SettingsDialog(QtWidgets.QDialog):
 
-    def __init__(self, view):
+    def __init__(self, view, start_page=None):
         super().__init__(view)
         self.view = view
         self.settings = BeeSettings()
@@ -586,7 +523,8 @@ class SettingsDialog(QtWidgets.QDialog):
             setting_check(s, 'Appearance/show_notes',
                           'always show notes, not just on hover'),
         )))
-        self.pages.addWidget(self.scrolled(ContentPage(view, s)))
+        from beeref.rboard.ui.plugins_ui import PluginsPage
+        self.pages.addWidget(self.scrolled(PluginsPage(view, s)))
         keys = QtWidgets.QPushButton('edit keyboard & mouse controls')
         keys.clicked.connect(self.open_controls)
         folder = QtWidgets.QPushButton('open settings folder')
@@ -597,7 +535,8 @@ class SettingsDialog(QtWidgets.QDialog):
             keys, folder)))
 
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
-        self.nav.setCurrentRow(0)
+        self.nav.setCurrentRow(
+            SECTIONS.index(start_page) if start_page in SECTIONS else 0)
 
         reset = QtWidgets.QPushButton('restore defaults')
         reset.clicked.connect(self.on_restore_defaults)

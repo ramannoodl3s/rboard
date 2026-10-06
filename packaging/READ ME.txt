@@ -3,8 +3,9 @@ R Board {version} - a moodboard app for Windows 10 and 11
 Run "R Board.exe". Nothing needs installing; keep this whole folder
 together (the _internal folder is part of the app).
 
-The first time, Windows may say "Windows protected your PC" because the
-app isn't signed: click "More info", then "Run anyway".
+Windows may say "Windows protected your PC" because the app isn't
+signed: click "More info", then "Run anyway". (Or, before unzipping,
+right-click the zip > Properties > tick Unblock > OK.)
 
 Getting started
 - Drag images, or a whole folder of images, onto the window.
@@ -14,8 +15,10 @@ Getting started
   a sub board next to the main board.
 - Save boards as .brd files (Ctrl+S). Shortcuts follow PureRef's.
 
-Tags like kind, mood and style come from a small image model that runs on
-your computer. R Board asks before downloading it (about 90 MB, once).
+AI features (kind, mood and style tags, search by meaning, group by
+content) are a one-time install: Plugins > Get AI Features (about 175 MB).
+They run on your computer; nothing is uploaded. Other plugins install
+from Plugins > Install Plugin from File.
 
 New versions: https://github.com/ramannoodl3s/rboard/releases/latest
 

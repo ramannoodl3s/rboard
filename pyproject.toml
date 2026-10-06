@@ -10,7 +10,7 @@ include = ["beeref*"]
 
 [project]
 name = "RBoard"
-version = "0.2.0"
+version = "0.3.0"
 description = "A moodboard app, based on the BeeRef reference image viewer"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -26,8 +26,6 @@ dependencies = [
     "rectangle-packer>=2.0.1,<=2.0.2",
     # R Board
     "numpy>=1.26",
-    "onnxruntime>=1.20",
-    "tokenizers>=0.20",
     "winrt-runtime; sys_platform == 'win32'",
     "winrt-Windows.Foundation; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections; sys_platform == 'win32'",
@@ -35,6 +33,14 @@ dependencies = [
     "winrt-Windows.Graphics.Imaging; sys_platform == 'win32'",
     "winrt-Windows.Media.Ocr; sys_platform == 'win32'",
     "winrt-Windows.Storage.Streams; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+# The AI features plugin's libraries (plugins/ai); the portable app
+# downloads them as a plugin instead
+ai = [
+    "onnxruntime>=1.20",
+    "tokenizers>=0.20",
 ]
 
 [project.gui-scripts]
