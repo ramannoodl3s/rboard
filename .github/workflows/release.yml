@@ -41,3 +41,24 @@ jobs:
             **Download:** `R-Board-…-portable.zip` below, unzip it anywhere and run `R Board.exe`. Nothing needs installing.
 
             The first time, Windows may say "Windows protected your PC" (the app isn't signed): click **More info**, then **Run anyway**.
+
+            <details><summary>Run from source</summary>
+
+            Needs Python 3.11 on Windows 10 or 11.
+
+            ```
+            python -m venv .venv
+            .venv\Scripts\pip install -e .
+            .venv\Scripts\rboard.exe
+            ```
+
+            Build the portable zip yourself:
+
+            ```
+            .venv\Scripts\pip install -r requirements\build.txt
+            powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Python .venv\Scripts\python.exe
+            ```
+
+            New release: set `VERSION` in `beeref/constants.py` and `pyproject.toml`, commit, then `git tag v<version>` and `git push origin v<version>`.
+
+            </details>
