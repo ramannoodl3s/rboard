@@ -33,7 +33,56 @@ FAMILY_DOTS = {
     'red': '#c4564a', 'orange': '#d0874f', 'yellow': '#d6b85a',
     'green': '#6f9a5b', 'teal': '#4f9a92', 'blue': '#5a7fc0',
     'purple': '#8a6bb8', 'pink': '#c87094', 'neutral': '#9a9a9a',
+    'white': '#ececec', 'grey': '#8c8c8c', 'black': '#1e1e1e',
 }
+COLOR_TAG_SHARE = 0.15    # a colour names an image when it covers this much
+ACCENT_SHARE = 0.01       # smallest area an accent colour can have
+
+
+def hue_family(hex_color):
+    """The hue name of a colour, however faint."""
+    L, a, b = analysis.rgb_to_lab(analysis.from_hex(hex_color))
+    hue = math.degrees(math.atan2(b, a)) % 360
+    name = HUE_FAMILIES[0][0]
+    for family, start in HUE_FAMILIES:
+        if hue >= start:
+            name = family
+    return name
+
+
+def band_family(band):
+    """Hue name for a 5-degree hue band (0 = 0-5 degrees)."""
+    hue = band * 5 + 2.5
+    name = HUE_FAMILIES[0][0]
+    for family, start in HUE_FAMILIES:
+        if hue >= start:
+            name = family
+    return name
+
+
+def color_tags(stats):
+    """(main colour names, accent name or None) for an image: colours
+    that cover a good part of it, by area, and a small but strong colour
+    if there is one (the blue lights on a dark photo)."""
+    palette = stats.get('palette')
+    if not palette:
+        return [color_family(stats['dominant'])], None
+    shares = analysis.breakdown(palette, hue_family)
+    ranked = sorted(shares.items(), key=lambda kv: -kv[1])
+    main = [name for name, share in ranked
+            if share >= COLOR_TAG_SHARE][:3] or [ranked[0][0]]
+    # Accent: the hue family with the most strongly coloured pixels,
+    # if it isn't one of the main colours already
+    vivid = {}
+    for band, share in stats.get('vivid', {}).items():
+        name = band_family(int(band))
+        vivid[name] = vivid.get(name, 0) + share
+    accent = None
+    for name, share in sorted(vivid.items(), key=lambda kv: -kv[1]):
+        if share >= ACCENT_SHARE and name not in main:
+            accent = name
+            break
+    return main, accent
 
 
 def color_family(hex_color):
@@ -100,8 +149,12 @@ def attributes(item):
     stats = item.meta.get('analysis', {})
     out = []
     if stats:
-        family = color_family(stats['dominant'])
-        out.append((f'color:{family}', family, FAMILY_DOTS[family], 'auto'))
+        main, accent = color_tags(stats)
+        for name in main:
+            out.append((f'color:{name}', name, FAMILY_DOTS[name], 'auto'))
+        if accent:
+            out.append((f'accent:{accent}', f'accent · {accent}',
+                        FAMILY_DOTS[accent], 'auto'))
         t = tone(stats['average'])
         out.append((f'tone:{t}', t, stats['average'], 'auto'))
     from beeref.rboard import semantic
@@ -139,8 +192,8 @@ def attributes(item):
     return out
 
 
-MAIN = ('color', 'tone', 'kind', 'mood', 'style')
-HINTS = {'color': 'colour', 'tone': 'tone', 'kind': 'kind', 'mood': 'mood',
+MAIN = ('color', 'accent', 'tone', 'kind', 'mood', 'style')
+HINTS = {'color': 'colour', 'accent': 'colour', 'tone': 'tone', 'kind': 'kind', 'mood': 'mood',
          'style': 'style', 'looks': 'subject', 'shape': 'shape',
          'cover': 'guess'}
 

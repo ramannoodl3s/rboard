@@ -313,7 +313,7 @@ class LinksMixin:
         entries = [('sep',), ('label', 'links'),
                    ('item', 'link to another image…',
                     lambda: self.rb_start_link_pick(item),
-                    {'icon': 'link', 'kbd': 'L',
+                    {'icon': 'link', 'kbd': self.rb_kbd('link_images'),
                      'tooltip': 'or drag from the round handle on the '
                                 'image'})]
         for other in outgoing:

@@ -247,8 +247,6 @@ class SQLiteIO:
                 if self.worker.canceled:
                     self.worker.finished.emit('', [])
                     return
-                # Give main thread time to process items:
-                self.worker.msleep(10)
         if self.worker:
             self.worker.finished.emit(self.filename, [])
 

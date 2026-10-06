@@ -59,7 +59,10 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         else:
             if not self.restoreGeometry(geom):
                 self.resize(default_window_size)
-        self.setCentralWidget(self.view)
+        # R Board: the window is divided into areas, as in Blender
+        from beeref.rboard.ui.areas import Screen
+        self.screen = Screen(self, self.view)
+        self.setCentralWidget(self.screen)
         self.show()
 
     def closeEvent(self, event):

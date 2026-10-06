@@ -126,7 +126,8 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         # R Board metadata saved with the item: source_url, arena_key,
         # arena_channel, ocr_text, analysis (cached color statistics)
         self.meta = {}
-        self._value_study_cache = None
+        self._study_cache = None
+        self.study_mode = None  # R Board colour study: 'value'/'color'
 
     @classmethod
     def create_from_data(self, **kwargs):
@@ -236,24 +237,15 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             data['rboard'] = self.meta
         return data
 
-    VALUE_STUDY_MAX_SIDE = 1024
-
-    def value_study_pixmap(self, levels):
-        """The image reduced to ``levels`` gray tones, cached per level
-        count. Computed at a capped resolution so toggling the value
-        study on a big board stays quick."""
-        if self._value_study_cache and self._value_study_cache[0] == levels:
-            return self._value_study_cache[1]
-        from beeref.rboard.analysis import posterize
-        pm = self.pixmap()
-        if max(pm.width(), pm.height()) > self.VALUE_STUDY_MAX_SIDE:
-            pm = pm.scaled(self.VALUE_STUDY_MAX_SIDE,
-                           self.VALUE_STUDY_MAX_SIDE,
-                           Qt.AspectRatioMode.KeepAspectRatio,
-                           Qt.TransformationMode.SmoothTransformation)
-        result = QtGui.QPixmap.fromImage(posterize(pm.toImage(), levels))
-        self._value_study_cache = (levels, result)
-        return result
+    def color_study(self):
+        """R Board colour study of the visible part of the image (see
+        beeref.rboard.colorstudy), computed when first shown."""
+        key = (self.crop.getRect(), bool(self.grayscale))
+        if self._study_cache is None or self._study_cache[0] != key:
+            from beeref.rboard import colorstudy
+            img = self.pixmap().copy(self.crop.toRect()).toImage()
+            self._study_cache = (key, colorstudy.study(img, self.grayscale))
+        return self._study_cache[1]
 
     def get_filename_for_export(self, imgformat, save_id_default=None):
         save_id = self.save_id or save_id_default
@@ -301,7 +293,8 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
 
     def setPixmap(self, pixmap):
         super().setPixmap(pixmap)
-        self._value_study_cache = None
+        self._study_cache = None
+        self.study_mode = None  # R Board colour study: 'value'/'color'
         self.reset_crop()
 
     def pixmap_from_bytes(self, data):
@@ -507,14 +500,14 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
                 self.draw_crop_rect(painter, handle())
             self.draw_crop_rect(painter, self.crop_temp)
         else:
-            levels = getattr(self.scene(), 'value_study_levels', 0)
-            if levels:
-                pm = self.value_study_pixmap(levels)
-                # The study pixmap may be downscaled; map the crop onto it
-                factor = pm.width() / max(self.pixmap().width(), 1)
-                source = QtCore.QRectF(
-                    self.crop.topLeft() * factor, self.crop.size() * factor)
-                painter.drawPixmap(self.crop, pm, source)
+            if self.study_mode:
+                # Flat regions, drawn blocky on purpose
+                overlay = self.color_study()[self.study_mode][0]
+                painter.save()
+                painter.setRenderHint(
+                    QtGui.QPainter.RenderHint.SmoothPixmapTransform, False)
+                painter.drawImage(self.crop, overlay)
+                painter.restore()
             else:
                 pm = (self._grayscale_pixmap if self.grayscale
                       else self.pixmap())

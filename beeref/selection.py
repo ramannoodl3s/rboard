@@ -162,7 +162,8 @@ class SelectableMixin(BaseItemMixin):
         screen so we need to adjust the values according to the scale
         factor sof the view and the item."""
 
-        if self.scene():
+        if self.scene() and self.scene().views():
+            # (a sub board's scene can briefly outlive its view)
             scale = self.scene().views()[0].get_scale()
             self._view_scale = scale
 

@@ -130,6 +130,8 @@ class RBoardMixin:
                      'center': [center.x(), center.y()]},
             'tags': attributes.all_tags(self.rb_images()),
             'subboards': self.subboards.snapshot(),
+            'areas': self.rb_screen.snapshot(self.subboards.kept_boards())
+            if getattr(self, 'rb_screen', None) else [],
         }
 
     def rb_restore_view(self, data):
@@ -208,35 +210,6 @@ class RBoardMixin:
 
     # ---------- arranging ----------
 
-    def rb_arrange_by_color(self, field, mode):
-        self.cancel_active_modes()
-        items = self.rb_selected()
-        images = [i for i in items if i.is_image]
-        if len(items) < 2:
-            self.rb_notify(
-                'Select the images to arrange first (Ctrl+A for all)')
-            return
-        stats = self.rb_analyze(images)
-        if stats is None:
-            return
-        order = sorted(zip(images, stats),
-                       key=lambda p: analysis.sort_key(p[1][field], mode))
-        others = [i for i in items if not i.is_image]
-        ordered = [i for i, _ in order] + others
-        sizes = [(r.width(), r.height()) for r in (
-            self.scene.itemsBoundingRect(items=[i]) for i in ordered)]
-        self.rb_place(ordered, layouts.flow(sizes, self.rb_gap(ordered)),
-                      center=self.scene.get_selection_center())
-
-    def on_action_arrange_color_average(self):
-        self.rb_arrange_by_color('average', 'hue')
-
-    def on_action_arrange_color_dominant(self):
-        self.rb_arrange_by_color('dominant', 'hue')
-
-    def on_action_arrange_lightness(self):
-        self.rb_arrange_by_color('average', 'lightness')
-
     def rb_arrange_layout(self, name):
         self.cancel_active_modes()
         items = self.rb_selected()
@@ -262,38 +235,57 @@ class RBoardMixin:
     def on_action_arrange_grid(self):
         self.rb_arrange_layout('grid')
 
-    # ---------- palette ----------
+    # ---------- colour study and sorting ----------
 
-    def rb_palette(self, images):
-        """[(hex, share)] for the images, most prominent first. An image's
-        own palette is worked out the first time it's viewed and kept with
-        the image (and saved in the board)."""
-        count = self.settings.valueOrDefault('Items/palette_size')
-        if len(images) == 1:
-            item = images[0]
-            key = [*_qrect(item.crop), bool(item.grayscale), count,
-                   analysis.PALETTE_VERSION]
-            cached = item.meta.get('palette')
-            if cached and cached.get('key') == key:
-                return [tuple(c) for c in cached['colors']]
-            thumb = analysis.thumbnail_for(item.pixmap(), item.crop)
-            colors = analysis.image_palette(thumb, count, item.grayscale)
-            item.meta['palette'] = {'key': key,
-                                    'colors': [list(c) for c in colors]}
-            return colors
-        stats = self.rb_analyze(images)
-        if stats is None:
-            return []
-        return analysis.palette(stats, count)
+    def rb_set_study(self, images, mode):
+        """Show the colour study ('value', 'color' or None = off) on
+        images."""
+        for item in images:
+            item.study_mode = mode
+            item.update()
 
-    def on_action_generate_palette(self):
-        """View the palette of the selection (or the board) in a menu."""
+    def on_action_color_study(self):
+        """Cycle the selected images: value, colour, off."""
         self.cancel_active_modes()
-        images = self.rb_selected(images_only=True, all_if_empty=True)
+        images = self.rb_selected(images_only=True)
         if not images:
-            self.rb_notify('there are no images to take colours from')
+            self.rb_notify('select images for a colour study')
             return
-        self.rb_show_palette(images)
+        modes = [None, 'value', 'color']
+        current = images[0].study_mode
+        mode = modes[(modes.index(current) + 1) % 3]
+        self.rb_set_study(images, mode)
+        self.rb_notify({None: 'colour study off', 'value': 'value study',
+                        'color': 'colour study'}[mode])
+
+    def on_action_sort_color(self):
+        from beeref.rboard.ui.colorsort import ColorSortDialog
+        self.cancel_active_modes()
+        images = self.rb_selected(images_only=True) or self.rb_images()
+        if len(images) < 2:
+            self.rb_notify('add some images first')
+            return
+        if self.rb_analyze(images) is None:
+            return
+        dialog = ColorSortDialog(self, images)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        ordered = dialog.result_images()
+        if not ordered:
+            return
+        if dialog.to_subboard():
+            parent = self.board if self.is_subboard else None
+            sources = [getattr(i, 'link_source', i) for i in ordered]
+            self.rb_manager().open_list(dialog.title(), sources, parent)
+            return
+        sizes = [(r.width(), r.height()) for r in (
+            self.scene.itemsBoundingRect(items=[i]) for i in ordered)]
+        topleft = self.scene.itemsBoundingRect(items=ordered).topLeft()
+        self.rb_place(ordered, layouts.flow(sizes, self.rb_gap(ordered)),
+                      topleft=topleft)
+        self.scene.clearSelection()
+        for item in ordered:
+            item.setSelected(True)
 
     # ---------- find by color / duplicates ----------
 
@@ -384,23 +376,6 @@ class RBoardMixin:
                 'copy of each. Press Delete to remove them.')
         else:
             self.rb_notify('No duplicates found')
-
-    # ---------- value study ----------
-
-    def on_action_value_study(self, checked):
-        levels = self.settings.valueOrDefault('Items/value_study_levels')
-        self.scene.value_study_levels = levels if checked else 0
-        self.scene.update()
-
-    def on_action_value_study_levels(self):
-        levels, ok = QtWidgets.QInputDialog.getInt(
-            self, 'Value Study', 'Number of gray tones:',
-            self.settings.valueOrDefault('Items/value_study_levels'), 2, 8)
-        if ok:
-            self.settings.setValue('Items/value_study_levels', levels)
-            if self.scene.value_study_levels:
-                self.scene.value_study_levels = levels
-                self.scene.update()
 
     # ---------- text recognition and search ----------
 

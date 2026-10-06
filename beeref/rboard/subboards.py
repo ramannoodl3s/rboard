@@ -77,7 +77,10 @@ class SubBoard:
 
     @property
     def state(self):
-        return 'open' if self.window else 'cached'
+        """'area', 'window' or 'closed'."""
+        if self.window is None:
+            return 'closed'
+        return 'area' if hasattr(self.window, 'release') else 'window'
 
     @property
     def is_tree(self):
@@ -154,6 +157,13 @@ class SubBoardManager(QtCore.QObject):
         self.show(board)
         return board
 
+    def open_list(self, title, sources, parent=None):
+        """A sub board of these images, in this order."""
+        board = SubBoard(title, 'list:' + title, list(sources), parent)
+        self.boards.append(board)
+        self.show(board)
+        return board
+
     def open_query(self, title, rule, candidates, parent=None):
         """A sub board of the images matching a query (see
         `query_matches`)."""
@@ -166,10 +176,13 @@ class SubBoardManager(QtCore.QObject):
 
     # -- keeping boards in the board file --
 
+    def kept_boards(self):
+        return [b for b in self.tree() if b.kept]
+
     def snapshot(self):
         """The saved boards and trees, as data for the .brd file."""
         from beeref.rboard import links
-        kept = [b for b in self.tree() if b.kept]
+        kept = self.kept_boards()
         out = []
         for board in kept:
             if board.window:  # remember the open layout too
@@ -205,6 +218,7 @@ class SubBoardManager(QtCore.QObject):
             return [index[u] for u in uids if u in index]
 
         made = []
+        self.restored = made
         for entry in entries or []:
             try:
                 parent = made[entry['parent']] \
@@ -260,15 +274,31 @@ class SubBoardManager(QtCore.QObject):
             return []
 
     def show(self, board):
+        """Bring a board up: where it already is, else in an area of the
+        main window (or a window of its own when there are no areas)."""
         if board.window:
-            board.window.showNormal()
-            board.window.raise_()
-            board.window.activateWindow()
+            board.window.focus()
             return
+        screen = getattr(self.main_view, 'rb_screen', None)
+        if screen is not None and screen.show_board(board) is not None:
+            return
+        self.pop_out(board)
+
+    def pop_out(self, board):
+        """Show a board in a window of its own."""
         from beeref.rboard.subboard_window import SubBoardWindow
+        if board.window is not None:
+            board.window.close()
         board.window = SubBoardWindow(self, board)
         board.window.show()
         self.changed.emit()
+
+    def dock(self, board):
+        """Move a board from its window into an area of the main
+        window."""
+        if board.window is not None:
+            board.window.close()
+        self.show(board)
 
     # -- lifecycle --
 

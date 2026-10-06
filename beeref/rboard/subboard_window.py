@@ -28,9 +28,10 @@ class SubBoardView(BeeGraphicsView):
 
     is_subboard = True
 
-    def __init__(self, app, window, manager, board):
+    def __init__(self, app, window, manager, board, docked=None):
         self.manager = manager
         self.board = board
+        self.docked = docked   # the DockedBoard when shown in an area
         super().__init__(app, window)
         self.welcome_overlay.hide()
         self.actiongroup_set_enabled('active_when_items_in_scene', True)
@@ -47,6 +48,9 @@ class SubBoardView(BeeGraphicsView):
         board = getattr(self, 'board', None)
         if board is None or callable(self.scene):
             return  # still being set up (self.scene is Qt's method yet)
+        if self.docked is not None:
+            self.docked.title_changed()  # shown in the area header
+            return
         count = sum(1 for i in self.scene.items_for_save() if i.is_image)
         self.parent.setWindowTitle(
             f'{board.title} · {count} images — {constants.APPNAME}')
@@ -60,7 +64,7 @@ class SubBoardView(BeeGraphicsView):
         return True
 
     def on_action_quit(self):
-        self.parent.close()
+        (self.docked or self.parent).close()
 
     def rb_handle_drop(self, urls):
         return True  # sub boards only hold linked images
@@ -93,25 +97,9 @@ class SubBoardView(BeeGraphicsView):
         window.activateWindow()
 
 
-class SubBoardWindow(QtWidgets.QMainWindow):
-
-    def __init__(self, manager, board):
-        main_window = manager.main_view.parent
-        super().__init__(main_window, QtCore.Qt.WindowType.Window)
-        self.manager = manager
-        self.board = board
-        self.discarding = False
-        self.setWindowIcon(BeeAssets().logo)
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
-        app = QtWidgets.QApplication.instance()
-        self.view = SubBoardView(app, self, manager, board)
-        self.setCentralWidget(self.view)
-        geo = main_window.geometry()
-        self.resize(max(480, int(geo.width() * 0.7)),
-                    max(360, int(geo.height() * 0.7)))
-        offset = 32 * (board.depth() + 1)
-        self.move(geo.x() + offset, geo.y() + offset)
-        self.populate()
+class BoardContent:
+    """Filling a sub board's view with linked copies, and remembering
+    its layout. Shared by sub boards in areas and in their own windows."""
 
     def add_header(self, text, x, y, scale):
         header = BeeTextItem(text)
@@ -267,17 +255,132 @@ class SubBoardWindow(QtWidgets.QMainWindow):
                             item.scale(), item.zValue()))
         return out
 
-    def discard(self):
-        self.discarding = True
-        self.close()
-
     def header_snapshot(self):
         return [(i.toPlainText(), i.pos().x(), i.pos().y(), i.scale())
                 for i in self.view.scene.items_for_save()
                 if getattr(i, 'is_header', False)]
+
+
+class SubBoardWindow(QtWidgets.QMainWindow, BoardContent):
+    """A sub board in its own window."""
+
+    def __init__(self, manager, board):
+        main_window = manager.main_view.parent
+        super().__init__(main_window, QtCore.Qt.WindowType.Window)
+        self.manager = manager
+        self.board = board
+        self.discarding = False
+        self.setWindowIcon(BeeAssets().logo)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        app = QtWidgets.QApplication.instance()
+        self.view = SubBoardView(app, self, manager, board)
+        self.setCentralWidget(self.view)
+        geo = main_window.geometry()
+        self.resize(max(480, int(geo.width() * 0.7)),
+                    max(360, int(geo.height() * 0.7)))
+        offset = 32 * (board.depth() + 1)
+        self.move(geo.x() + offset, geo.y() + offset)
+        self.view.rb_area = None
+        self.populate()
+
+    def focus(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def discard(self):
+        self.discarding = True
+        self.close()
 
     def closeEvent(self, event):
         if not self.discarding and self.board.window is self:
             self.board.headers = self.header_snapshot()
             self.manager.on_window_closed(self.board, self.layout_snapshot())
         event.accept()
+
+
+class DockedBoard(QtWidgets.QWidget, BoardContent):
+    """A sub board shown in an area of the main window."""
+
+    def __init__(self, manager, board, area):
+        super().__init__()
+        self.manager = manager
+        self.board = board
+        self.area = area
+        self.released = False
+        app = QtWidgets.QApplication.instance()
+        # Window-level actions (menu bar, always on top…) act on the main
+        # window, which this view sits in
+        self.view = SubBoardView(app, manager.main_view.parent, manager,
+                                 board, docked=self)
+        self.view.setParent(self)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.view)
+        board.window = self
+        # Stay fitted to the area until you zoom or pan yourself
+        self.keep_fitted = True
+        self.view.viewport().installEventFilter(self)
+        self.populate()
+        manager.changed.emit()
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.Type.Wheel,
+                            QtCore.QEvent.Type.MouseButtonPress):
+            self.keep_fitted = False
+        return False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.keep_fitted and self.width() > 50 and self.height() > 50:
+            QtCore.QTimer.singleShot(0, self.refit)
+
+    def refit(self):
+        if self.keep_fitted and not self.released:
+            self.view.on_action_fit_scene()
+
+    def title_changed(self):
+        area = getattr(self, 'rb_area', None)
+        if area is not None:
+            area.header.update()
+
+    def release(self):
+        """Leaving the area: keep the layout so the board reopens the same
+        way, and let go of the view."""
+        if self.released:
+            return
+        self.released = True
+        if self.board.window is self:
+            self.board.headers = self.header_snapshot()
+            self.manager.on_window_closed(self.board, self.layout_snapshot())
+        self.view.subboard_closing = True
+        self.deleteLater()
+
+    def close(self):
+        """Close the area showing this board (the board stays cached)."""
+        area = getattr(self, 'rb_area', None)
+        if area is not None and area.screen is not None \
+                and area in area.screen.areas:
+            area.screen.close_area_keeping(area)
+        else:
+            self.release()
+        return True
+
+    def discard(self):
+        """The board is being thrown away: close without caching."""
+        if self.board.window is self:
+            self.board.window = None
+        self.released = True
+        self.close()
+
+    def focus(self):
+        area = getattr(self, 'rb_area', None)
+        if area is not None:
+            screen = area.screen
+            if screen.maximized is not None and screen.maximized is not area:
+                screen.toggle_maximize()
+            window = screen.window()
+            window.showNormal()
+            window.raise_()
+            window.activateWindow()
+        self.view.setFocus()

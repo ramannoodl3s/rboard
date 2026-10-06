@@ -76,8 +76,6 @@ def load_images(filenames, pos, scene, worker):
         items.append(item)
         if worker.canceled:
             break
-        # Give main thread time to process items:
-        worker.msleep(10)
 
     scene.undo_stack.push(
         commands.InsertItems(scene, items, ignore_first_redo=True))

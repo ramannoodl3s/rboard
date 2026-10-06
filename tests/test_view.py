@@ -252,6 +252,8 @@ def test_open_from_file(clear_mock, view, qtbot):
     view.open_from_file(filename)
     view.worker.wait()
     qtbot.waitUntil(lambda: view.on_loading_finished.called is True)
+    assert len(view.scene.items()) == 0  # added in one go when finished
+    view.scene.add_queued_items()
     assert len(view.scene.items()) == 1
     item = view.scene.items()[0]
     assert item.isSelected() is False
@@ -282,6 +284,8 @@ def test_on_action_open(dialog_mock, view, qtbot):
 
     view.on_action_open()
     qtbot.waitUntil(lambda: view.on_loading_finished.called is True)
+    assert len(view.scene.items()) == 0  # added in one go when finished
+    view.scene.add_queued_items()
     assert len(view.scene.items()) == 1
     item = view.scene.items()[0]
     assert item.isSelected() is False
@@ -623,6 +627,7 @@ def test_on_action_insert_images_new_scene(
     view.cancel_active_modes = MagicMock()
     view.on_action_insert_images()
     qtbot.waitUntil(lambda: view.on_insert_images_finished.called is True)
+    view.scene.add_queued_items()  # done by the (mocked) finished handler
     assert len(view.scene.items()) == 1
     item = view.scene.items()[0]
     assert item.isSelected() is True
@@ -642,6 +647,7 @@ def test_on_action_insert_images_existing_scene(
     view.cancel_active_modes = MagicMock()
     view.on_action_insert_images()
     qtbot.waitUntil(lambda: view.on_insert_images_finished.called is True)
+    view.scene.add_queued_items()  # done by the (mocked) finished handler
     assert len(view.scene.items()) == 2
     item = view.scene.items()[0]
     assert item.isSelected() is True
@@ -660,6 +666,7 @@ def test_on_action_insert_images_when_error(
     view.cancel_active_modes = MagicMock()
     view.on_action_insert_images()
     qtbot.waitUntil(lambda: view.on_insert_images_finished.called is True)
+    view.scene.add_queued_items()  # done by the (mocked) finished handler
     assert len(view.scene.items()) == 1
     item = view.scene.items()[0]
     assert item.isSelected() is True

@@ -80,14 +80,16 @@ class ExporterBase:
 class SceneExporterBase(ExporterBase):
     """For exporting the scene to a single image."""
 
-    def __init__(self, scene):
+    def __init__(self, scene, items=None):
         self.scene = scene
+        # R Board: export only these items (as laid out on the board)
+        self.items = list(items) if items else None
         self.scene.cancel_active_modes()
         self.scene.deselect_all_items()
         # Selection outlines/handles will be rendered to the exported
         # image, so deselect first. (Alternatively, pass an attribute
         # to paint functions to not paint them?)
-        rect = self.scene.itemsBoundingRect()
+        rect = self.source_rect()
         logger.trace(f'Items bounding rect: {rect}')
         size = QtCore.QSize(int(rect.width()), int(rect.height()))
         logger.trace(f'Export size without margins: {size}')
@@ -96,6 +98,14 @@ class SceneExporterBase(ExporterBase):
             QtCore.QMargins(*([int(self.margin)] * 4)))
         logger.debug(f'Default export margin: {self.margin}')
         logger.debug(f'Default export size with margins: {self.default_size}')
+
+    def source_rect(self):
+        if self.items:
+            return self.scene.itemsBoundingRect(items=self.items)
+        return self.scene.itemsBoundingRect()
+
+    def exported_items(self):
+        return self.items if self.items else self.scene.items()
 
 
 @register_exporter
@@ -132,9 +142,21 @@ class SceneToPixmapExporter(SceneExporterBase):
             self.size.width() - 2 * margin,
             self.size.height() - 2 * margin)
         logger.trace(f'Final export target_rect: {target_rect}')
-        self.scene.render(painter,
-                          source=self.scene.itemsBoundingRect(),
-                          target=target_rect)
+        hidden = []
+        if self.items:
+            # Leave out everything else that overlaps the selection
+            keep = set(map(id, self.items))
+            for item in self.scene.items_for_save():
+                if id(item) not in keep and item.isVisible():
+                    item.setVisible(False)
+                    hidden.append(item)
+        try:
+            self.scene.render(painter,
+                              source=self.source_rect(),
+                              target=target_rect)
+        finally:
+            for item in hidden:
+                item.setVisible(True)
         painter.end()
         return image
 
@@ -194,10 +216,10 @@ class SceneToSVGExporter(SceneExporterBase):
                     'xmlns:xlink': 'http://www.w3.org/1999/xlink',
                     })
 
-        rect = self.scene.itemsBoundingRect()
+        rect = self.source_rect()
         offset = rect.topLeft() - QtCore.QPointF(self.margin, self.margin)
 
-        for i, item in enumerate(sorted(self.scene.items(),
+        for i, item in enumerate(sorted(self.exported_items(),
                                         key=lambda x: x.zValue())):
             # z order in SVG specified via the order of elements in the tree
             pos = item.pos() - offset

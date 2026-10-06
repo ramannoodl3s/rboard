@@ -21,7 +21,7 @@ from PyQt6 import QtGui
 from PyQt6.QtCore import Qt
 
 
-ANALYSIS_VERSION = 1
+ANALYSIS_VERSION = 2   # 2: adds the 8-colour breakdown ('palette')
 THUMB_SIZE = 64      # longest side of the analysis thumbnail
 SAMPLE_SIZE = 16     # side of the stored pixel sample (16x16 = 256 colors)
 NEUTRAL_CHROMA = 12  # below this LCh chroma a color counts as gray
@@ -165,11 +165,29 @@ def analyze(thumb, grayscale=False):
 
     return {
         'v': ANALYSIS_VERSION,
+        # The image's 8 main colours by how much of it each covers; shared
+        # by colour tags, colour sorting and the palette
+        'palette': [[h, round(share, 4)]
+                    for h, share in _palette_from(opaque, 8)],
+        'vivid': vivid_hues(lab),
         'average': to_hex(average),
         'dominant': to_hex(dominant),
         'sample': s_rgb.tobytes().hex(),
         'dhash': f'{_dhash(thumb):016x}',
     }
+
+
+def vivid_hues(lab):
+    """Share of the image in strong colour, per 5-degree hue band (for
+    accent colours too small to win a palette slot)."""
+    chroma = np.hypot(lab[:, 1], lab[:, 2])
+    vivid = chroma >= ACCENT_CHROMA
+    if not vivid.any():
+        return {}
+    hue = (np.degrees(np.arctan2(lab[vivid, 2], lab[vivid, 1])) % 360)
+    bands = np.bincount((hue // 5).astype(int), minlength=72)
+    return {str(i): round(n / len(lab), 4)
+            for i, n in enumerate(bands) if n}
 
 
 def sample_pixels(stats):
@@ -196,9 +214,6 @@ def sort_key(hex_color, mode):
     return (0, int(hue // 15), -L)
 
 
-PALETTE_VERSION = 1
-
-
 def _palette_from(pixels, count):
     """[(hex, share)] from (N, 3) uint8 pixels, most prominent first."""
     if len(pixels) > 60000:
@@ -211,37 +226,31 @@ def _palette_from(pixels, count):
             for i in order if counts[i]]
 
 
-def palette(stats_list, count):
-    """Several images' dominant colors as [(hex, share)], most common
-    first."""
-    return _palette_from(
-        np.concatenate([sample_pixels(s) for s in stats_list]), count)
-
-
-def image_palette(thumb, count, grayscale=False):
-    """One image's palette from its analysis thumbnail (QImage)."""
-    rgb, alpha = qimage_to_rgb(thumb)
-    pixels = rgb[alpha > 128]
-    if len(pixels) == 0:
-        pixels = rgb.reshape(-1, 3)
-    if grayscale:
-        g = np.round(pixels @ np.array([0.299, 0.587, 0.114]))
-        pixels = np.repeat(g[:, None], 3, 1).astype(np.uint8)
-    return _palette_from(pixels, count)
-
-
 def hamming(hash_a, hash_b):
     return bin(int(hash_a, 16) ^ int(hash_b, 16)).count('1')
 
 
-def posterize(img, levels):
-    """Value study: the image as `levels` flat gray tones (keeps alpha)."""
-    rgb, alpha = qimage_to_rgb(img)
-    lum = rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)
-    band = np.minimum((lum / 256 * levels).astype(np.int32), levels - 1)
-    gray = np.round(band * (255 / max(levels - 1, 1))).astype(np.uint8)
-    out = np.dstack([gray, gray, gray, alpha])
-    h, w = gray.shape
-    result = QtGui.QImage(out.tobytes(), w, h, w * 4,
-                          QtGui.QImage.Format.Format_RGBA8888)
-    return result.copy()  # detach from the numpy buffer
+# ---------- naming colours ----------
+
+NAMING_CHROMA = 18   # below this, a colour reads as white, grey or black
+ACCENT_CHROMA = 35   # a small area this colourful is an accent
+
+
+def lch(hex_color):
+    L, a, b = rgb_to_lab(from_hex(hex_color))
+    return L, math.hypot(a, b), math.degrees(math.atan2(b, a)) % 360
+
+
+def breakdown(palette, families):
+    """{colour name: share of the image} from a palette, merging clusters
+    with the same name. Near-greys are named by lightness. `families`
+    maps a chromatic hex colour to its hue name."""
+    out = {}
+    for hex_, share in palette:
+        L, chroma, _ = lch(hex_)
+        if chroma < NAMING_CHROMA:
+            name = 'white' if L >= 82 else ('black' if L < 22 else 'grey')
+        else:
+            name = families(hex_)
+        out[name] = out.get(name, 0) + share
+    return out

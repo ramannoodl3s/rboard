@@ -137,16 +137,6 @@ class BeeSettings(QtCore.QSettings):
             'validate': lambda x: x >= 0,
             'post_save_callback': QtGui.QImageReader.setAllocationLimit,
         },
-        'Items/value_study_levels': {
-            'default': 4,
-            'cast': int,
-            'validate': lambda x: 2 <= x <= 8,
-        },
-        'Items/palette_size': {
-            'default': 8,
-            'cast': int,
-            'validate': lambda x: 2 <= x <= 24,
-        },
         'Appearance/bar_hide_delay': {
             # Seconds before the home bar fades out; 0 = always visible
             'default': 2.0,

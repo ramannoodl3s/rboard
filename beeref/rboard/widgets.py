@@ -96,7 +96,7 @@ class FindColorDialog(QtWidgets.QDialog):
 
 
 class SearchBar(QtWidgets.QFrame):
-    """Floating search field at the top of the board (Ctrl+F)."""
+    """Floating search field at the top of the board (find text)."""
 
     query_changed = QtCore.pyqtSignal(str)
     next_requested = QtCore.pyqtSignal()

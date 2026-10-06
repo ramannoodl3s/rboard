@@ -437,6 +437,9 @@ class BeeGraphicsView(MainControlsMixin,
             if not self.rb_restore_view(data):
                 self.on_action_fit_scene()
             self.subboards.restore(data.get('subboards'), self.rb_images())
+            if getattr(self, 'rb_screen', None):
+                self.rb_screen.restore(data.get('areas'),
+                                       self.subboards.restored)
             self.rb_after_images_added()
 
     def on_action_open_recent_file(self, filename):
@@ -451,7 +454,8 @@ class BeeGraphicsView(MainControlsMixin,
         self.clear_scene()
         self.worker = fileio.ThreadedIO(
             fileio.load_bee, filename, self.scene)
-        self.worker.progress.connect(self.on_items_loaded)
+        # R Board: items are added in one go when loading is finished
+        # (adding them as they load redraws the board hundreds of times)
         self.worker.finished.connect(self.on_loading_finished)
         self.progress = widgets.BeeProgressDialog(
             f'Loading {filename}',
@@ -532,11 +536,24 @@ class BeeGraphicsView(MainControlsMixin,
         else:
             self.do_save(self.filename, create_new=False)
 
+    def on_action_export_selection(self):
+        """R Board: the selected items as one image, laid out as they are
+        on the board."""
+        items = self.scene.selectedItems(user_only=True)
+        if not items:
+            self.rb_notify('select what to export first')
+            return
+        self.rb_export_image(items)
+
     def on_action_export_scene(self):
+        self.rb_export_image()
+
+    def rb_export_image(self, items=None):
         directory = os.path.dirname(self.filename) if self.filename else None
         filename, formatstr = QtWidgets.QFileDialog.getSaveFileName(
             parent=self,
-            caption='Export Scene to Image',
+            caption=('Export Selection as Image' if items
+                     else 'Export Scene to Image'),
             directory=directory,
             filter=';;'.join(('Image Files (*.png *.jpg *.jpeg *.svg)',
                               'PNG (*.png)',
@@ -553,8 +570,21 @@ class BeeGraphicsView(MainControlsMixin,
         logger.debug(f'Got export filename {filename}')
 
         exporter_cls = exporter_registry[ext]
-        exporter = exporter_cls(self.scene)
+        exporter = exporter_cls(self.scene, items=items)
         if not exporter.get_user_input(self):
+            return
+        if items:
+            # Other items are hidden while rendering, so stay on this thread
+            QtWidgets.QApplication.setOverrideCursor(
+                Qt.CursorShape.WaitCursor)
+            try:
+                errors = []
+                exporter.export(filename)
+            except Exception as e:
+                errors = [str(e)]
+            finally:
+                QtWidgets.QApplication.restoreOverrideCursor()
+            self.on_export_finished(filename, errors)
             return
 
         self.worker = fileio.ThreadedIO(exporter.export, filename)
@@ -672,7 +702,6 @@ class BeeGraphicsView(MainControlsMixin,
             filenames,
             self.mapToScene(pos),
             self.scene)
-        self.worker.progress.connect(self.on_items_loaded)
         self.worker.finished.connect(
             partial(self.on_insert_images_finished,
                     not self.scene.items()))
@@ -1031,6 +1060,12 @@ class BeeGraphicsView(MainControlsMixin,
             return
         if self.active_mode == self.SAMPLE_COLOR_MODE:
             self.cancel_sample_color_mode()
+            event.accept()
+            return
+        if (event.key() == Qt.Key.Key_Escape
+                and self.scene.selectedItems(user_only=True)):
+            # Esc clears the selection, as in PureRef
+            self.on_action_deselect_all()
             event.accept()
             return
         super().keyPressEvent(event)

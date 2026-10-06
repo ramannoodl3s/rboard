@@ -97,31 +97,72 @@ class AddTagRow(QtWidgets.QWidget):
                    Qt.AlignmentFlag.AlignVCenter, 'add tag…')
 
 
-class PaletteStrip(QtWidgets.QWidget):
-    """The palette as one bar, each colour as wide as its share."""
+class StudyToggle(QtWidgets.QWidget):
+    """'colour study' with three switches: value, colour, off."""
 
-    def __init__(self, colors):
+    MODES = (('value', 'value'), ('color', 'colour'), (None, 'off'))
+
+    def __init__(self, menu, current, on_pick):
         super().__init__()
-        self.colors = colors
-        self.setFixedHeight(40)
+        self.menu = menu
+        self.current = current
+        self.on_pick = on_pick
+        self.hovered = None
+        self.setFixedHeight(ROW_H + 6)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def preferred_width(self):
-        return 240
+        return 300
+
+    def segments(self):
+        fm = self.fontMetrics()
+        x = self.width() - 10
+        out = []
+        for mode, label in reversed(self.MODES):
+            w = fm.horizontalAdvance(label) + 20
+            x -= w
+            out.append((mode, label, QtCore.QRectF(x, 5, w, ROW_H - 4)))
+            x -= 4
+        return list(reversed(out))
+
+    def mouseMoveEvent(self, e):
+        hit = next((m for m, _, r in self.segments()
+                    if r.contains(e.position())), 'none')
+        if hit != self.hovered:
+            self.hovered = hit
+            self.update()
+
+    def leaveEvent(self, e):
+        self.hovered = None
+        self.update()
+
+    def mouseReleaseEvent(self, e):
+        for mode, _, rect in self.segments():
+            if rect.contains(e.position()):
+                self.menu.close_all_menus()
+                QtCore.QTimer.singleShot(0, lambda m=mode: self.on_pick(m))
+                return
 
     def paintEvent(self, e):
+        t = tm()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        rect = QtCore.QRectF(self.rect()).adjusted(12, 8, -12, -8)
-        path = QtGui.QPainterPath()
-        path.addRoundedRect(rect, 6, 6)
-        p.setClipPath(path)
-        total = sum(share for _, share in self.colors) or 1
-        x = rect.x()
-        for hex_, share in self.colors:
-            w = rect.width() * share / total
-            p.fillRect(QtCore.QRectF(x, rect.y(), w + 1, rect.height()),
-                       QtGui.QColor(hex_))
-            x += w
+        icons.draw(p, 'palette', t.hex('ink-muted'),
+                   QtCore.QRectF(12, 0, 16, self.height()))
+        p.setPen(t.color('ink'))
+        p.drawText(QtCore.QRectF(36, 0, 120, self.height()),
+                   Qt.AlignmentFlag.AlignVCenter, 'colour study')
+        for mode, label, rect in self.segments():
+            on = mode == self.current
+            p.setPen(QtGui.QPen(t.color('accent' if on else 'control-border'),
+                                1))
+            p.setBrush(t.color('accent') if on else (
+                t.color('hover') if self.hovered == mode
+                else Qt.BrushStyle.NoBrush))
+            p.drawRoundedRect(rect.adjusted(.5, .5, -.5, -.5), 9, 9)
+            p.setPen(t.color('on-accent' if on else 'ink'))
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
 
 
 class NoteHover(QtCore.QObject):
@@ -285,6 +326,7 @@ class BoardUIMixin:
             ('sep',),
             ('action', 'import_pureref', 'import PureRef board…'),
             ('action', 'export_scene', 'export board as image…'),
+            ('action', 'export_selection', 'export selection as image…'),
             ('action', 'export_images', 'export images…'),
             ('sep',),
             ('action', 'quit', 'quit'),
@@ -311,9 +353,7 @@ class BoardUIMixin:
             ('sep',), ('label', 'content'),
             ('action', 'group_content', 'group by content…', ALL),
             ('sep',), ('label', 'colour'),
-            ('action', 'arrange_color_dominant', 'by dominant colour', SORT),
-            ('action', 'arrange_color_average', 'by average colour', SORT),
-            ('action', 'arrange_lightness', 'by lightness', SORT),
+            ('action', 'sort_color', 'sort by colour…', SORT),
             ('sep',), ('label', 'size'),
             ('action', 'normalize_height', 'same height', ALL),
             ('action', 'normalize_width', 'same width', ALL),
@@ -334,8 +374,7 @@ class BoardUIMixin:
                 ('action', 'reset_crop', 'crop'),
                 ('action', 'reset_transforms', 'everything')]),
             ('sep',), ('label', 'colour'),
-            ('submenu', 'view palette', lambda: self.rb_palette_entries(
-                self.rb_selected(images_only=True, all_if_empty=True)),
+            ('action', 'color_study', 'colour study (value, colour, off)',
              {'icon': 'palette'}),
             ('action', 'sample_color', 'pick a colour'),
             ('action', 'show_color_gamut', 'colour spread'),
@@ -408,13 +447,33 @@ class BoardUIMixin:
             ('action', 'tag_images', 'tag selected images…'),
         ]
 
+    def rb_menu_area(self):
+        """View > Area, as in Blender."""
+        if self.is_subboard and getattr(self, 'rb_area', None) is None:
+            return [('item', 'dock in the main window',
+                     lambda: self.manager.dock(self.board))]
+        area = getattr(self, 'rb_area', None)
+        screen = getattr(self.rb_main(), 'rb_screen', None)
+        if screen is None or area is None:
+            return [('item', 'no areas here', None, {'enabled': False})]
+        return screen.area_entries(area)
+
+    def on_action_area_maximize(self):
+        area = getattr(self, 'rb_area', None)
+        if area is not None:
+            area.screen.toggle_maximize(area)
+
+    def on_action_area_focus(self):
+        area = getattr(self, 'rb_area', None)
+        if area is not None:
+            area.screen.toggle_focus(area)
+
     def rb_menu_view(self):
         entries = [
+            ('submenu', 'area', self.rb_menu_area, {'icon': 'grid'}),
+            ('sep',),
             ('action', 'fit_scene', 'fit board'),
             ('action', 'fit_selection', 'fit selection'),
-            ('sep',),
-            ('action', 'value_study', 'value study'),
-            ('action', 'value_study_levels', 'value study tones…'),
             ('sep',),
             ('action', 'always_on_top', 'always on top'),
             ('action', 'fullscreen', 'fullscreen'),
@@ -459,8 +518,9 @@ class BoardUIMixin:
             entries.append(('item', 'or right-click an image for one',
                             None, {'enabled': False, 'indent': 1}))
         for board in boards:
-            state = 'tree' if board.is_tree else (
-                'kept' if board.saved else board.state)
+            state = ' · '.join(filter(None, (
+                board.state, 'tree' if board.is_tree else
+                ('kept' if board.saved else ''))))
             entries.append((
                 'submenu', board.title,
                 lambda b=board: self.rb_board_entries(b),
@@ -482,8 +542,15 @@ class BoardUIMixin:
     def rb_board_entries(self, board):
         """What you can do with one sub board, from the layers menu."""
         manager = self.rb_manager()
-        entries = [('item', 'open', lambda: manager.show(board),
-                    {'icon': 'subboard'})]
+        state = board.state
+        entries = [('item', 'show' if state != 'closed' else 'open',
+                    lambda: manager.show(board), {'icon': 'subboard'})]
+        if state == 'window':
+            entries.append(('item', 'dock in the main window',
+                            lambda: manager.dock(board)))
+        else:
+            entries.append(('item', 'pop out to a window',
+                            lambda: manager.pop_out(board)))
         if board.is_tree:
             entries.append(('item', 'trees are always kept', None,
                             {'enabled': False, 'checked': True}))
@@ -566,6 +633,7 @@ class BoardUIMixin:
     def rb_context_menu(self, point):
         if self.pen_active:
             return
+        self._rb_menu_point = point
         item = self.rb_user_item_at(point)
         link = self.rb_link_at(point) if item is None else None
         if link is not None:
@@ -584,6 +652,7 @@ class BoardUIMixin:
                 ('action', 'cut', 'cut'),
                 ('action', 'raise_to_top', 'bring to front'),
                 ('action', 'lower_to_bottom', 'send to back'),
+                ('action', 'export_selection', 'export selection as image…'),
                 ('sep',),
                 ('action', 'delete', 'delete'),
             ]
@@ -670,39 +739,37 @@ class BoardUIMixin:
                              'tooltip': 'open as a sub board'}))
         return entries
 
-    def rb_palette_entries(self, images):
-        if not images:
-            return [('item', 'no images yet', None, {'enabled': False})]
-        colors = self.rb_palette(images)
-        if not colors:
-            return [('item', 'no colours found', None, {'enabled': False})]
+    def rb_study_entries(self, item, targets):
+        """Colour study switches, and the levels' hex codes while it's
+        showing."""
+        def pick(mode):
+            self.rb_set_study(targets, mode)
+            point = getattr(self, '_rb_menu_point', None)
+            if point is not None:  # show the menu again, with the codes
+                self.rb_context_menu(point)
+
+        entries = [('widget', lambda m: StudyToggle(m, item.study_mode,
+                                                    pick))]
+        if not item.study_mode:
+            return entries
+        levels = item.color_study()[item.study_mode][1]
 
         def copy(text, what):
             QtWidgets.QApplication.clipboard().setText(text)
             self.scene.internal_clipboard = []
             self.rb_notify(f'copied {what}')
 
-        entries = [('widget', lambda m: PaletteStrip(colors))]
-        for hex_, share in colors:
+        for hex_, share, lightness in levels:
+            hint = (f'L {lightness:.0f} · {share:.0%}'
+                    if item.study_mode == 'value' else f'{share:.0%}')
             entries.append(('item', hex_, lambda h=hex_: copy(h, h),
-                            {'dot': hex_, 'hint': f'{share:.0%}',
+                            {'dot': hex_, 'hint': hint, 'indent': 1,
                              'tooltip': 'copy this hex code'}))
-        codes = '\n'.join(h for h, _ in colors)
-        entries += [('sep',),
-                    ('item', 'copy all hex codes',
-                     lambda: copy(codes, f'{len(colors)} hex codes'))]
+        codes = '\n'.join(h for h, *_ in levels)
+        entries.append(('item', 'copy all hex codes',
+                        lambda: copy(codes, f'{len(levels)} hex codes'),
+                        {'indent': 1}))
         return entries
-
-    def rb_show_palette(self, images):
-        """The palette menu next to the images (Shift+P)."""
-        entries = [('label', 'palette' if len(images) == 1 else
-                    f'palette of {len(images)} images')]
-        entries += self.rb_palette_entries(images)
-        rect = self.mapFromScene(self.scene.itemsBoundingRect(
-            items=images)).boundingRect()
-        point = QtCore.QPoint(min(rect.right() + 8, self.width() - 40),
-                              max(rect.top(), 8))
-        self.menu_host.show(OverlayMenu(self, entries, min_width=240), point)
 
     def rb_image_menu(self, item):
         images, sources = self.rb_candidates()
@@ -716,16 +783,15 @@ class BoardUIMixin:
             origin = ' · from ' + attributes.channel_name(
                 item.meta['arena_channel'])
         title = os.path.basename(item.filename) if item.filename else 'image'
-        summary = ', '.join(label for _, label, *_ in main[2:4])
+        summary = ', '.join(label for key, label, *_ in main
+                            if key.split(':')[0] in ('kind', 'mood'))
         entries = [('widget', lambda m: Header(title, f'{w} × {h}{origin}')),
                    ('sep',),
                    ('submenu', 'tags', lambda: self.rb_tag_entries(item),
                     {'icon': 'tag', 'hint': summary}),
-                   ('submenu', 'view palette',
-                    lambda: self.rb_palette_entries([item]),
-                    {'icon': 'palette'})]
-
+                   ]
         targets = self.rb_targets(item)
+        entries += self.rb_study_entries(item, targets)
         board_key = self.board.key if self.is_subboard else ''
         if board_key.startswith('tag:'):
             # Confirm or drop suggestions straight from the tag's board
@@ -744,17 +810,23 @@ class BoardUIMixin:
             ('item', 'edit note…' if has_note else 'add note…',
              lambda: self.rb_edit_note(targets), {'icon': 'note'}),
             ('item', 'copy text', lambda: self.rb_copy_text(item),
-             {'kbd': 'Ctrl+Shift+T'}),
+             {'kbd': self.rb_kbd('extract_text')}),
         ]
         if item.meta.get('source_url') or (
                 item.filename and item.filename.startswith('http')):
             entries.append(('item', 'open source link',
                             self.on_action_open_source,
-                            {'icon': 'open-external', 'kbd': 'Ctrl+L'}))
+                            {'icon': 'open-external',
+                             'kbd': self.rb_kbd('open_source')}))
         if self.is_subboard:
             entries.append(('item', 'show in main board',
                             lambda: self.reveal_in_main(item),
                             {'icon': 'forward'}))
+        selected = self.scene.selectedItems(user_only=True)
+        if item.isSelected() and len(selected) > 1:
+            entries.append(('action', 'export_selection',
+                            f'export the {len(selected)} selected as one '
+                            'image…'))
         entries += [
             ('sep',),
             ('action', 'copy', 'copy'),
@@ -763,6 +835,14 @@ class BoardUIMixin:
              {'danger': True, 'kbd': 'Del'}),
         ]
         return entries
+
+    def rb_kbd(self, action_id):
+        """An action's current shortcut, for showing in a menu."""
+        qaction = getattr(self, 'bee_qactions', {}).get(action_id)
+        if qaction is None:
+            return ''
+        return qaction.shortcut().toString(
+            QtGui.QKeySequence.SequenceFormat.NativeText)
 
     def rb_targets(self, item):
         """The image plus the rest of the selection if it's selected."""

@@ -585,11 +585,6 @@ class SettingsDialog(QtWidgets.QDialog):
             section_label('notes'),
             setting_check(s, 'Appearance/show_notes',
                           'always show notes, not just on hover'),
-            section_label('colour'),
-            FieldRow('palette colours', setting_spin(
-                s, 'Items/palette_size', 2, 24)),
-            FieldRow('value study tones', setting_spin(
-                s, 'Items/value_study_levels', 2, 8)),
         )))
         self.pages.addWidget(self.scrolled(ContentPage(view, s)))
         keys = QtWidgets.QPushButton('edit keyboard & mouse controls')

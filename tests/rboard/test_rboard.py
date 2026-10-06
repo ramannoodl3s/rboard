@@ -60,19 +60,38 @@ def test_sort_key_orders_rainbow_then_neutrals():
     assert ordered == ['#ff0000', '#ffff00', '#00ff00', '#0000ff', '#808080']
 
 
-def test_palette_returns_requested_colors(qapp):
-    stats = [stats_for(solid(c)) for c in ('#ff0000', '#00ff00', '#0000ff')]
-    colors = analysis.palette(stats, 3)
-    assert sorted(h for h, _ in colors) == ['#0000ff', '#00ff00', '#ff0000']
-    assert abs(sum(share for _, share in colors) - 1) < 1e-6
+def test_breakdown_is_by_area_with_accent(qapp):
+    from beeref.rboard import attributes
+    # Mostly near-black with a warm off-white floor and small blue lights
+    img = solid('#101012', 200, 200, '#e8e2d6', 0.3)
+    p = QtGui.QPainter(img)
+    p.fillRect(90, 90, 30, 30, QtGui.QColor('#1e6cff'))
+    p.end()
+    stats = stats_for(img)
+    assert abs(sum(s for _, s in stats['palette']) - 1) < 0.01
+    main, accent = attributes.color_tags(stats)
+    assert main == ['black', 'white'] and accent == 'blue'
+    assert 'yellow' not in main
 
 
-def test_image_palette_sorted_by_prominence(qapp):
-    img = solid('#2040d0', 100, 100, '#e02020', 0.2)
-    colors = analysis.image_palette(analysis.thumbnail_for(
-        QtGui.QPixmap.fromImage(img), QtCore.QRectF(0, 0, 100, 100)), 2)
-    assert analysis.from_hex(colors[0][0])[2] > 180   # the blue first
-    assert colors[0][1] > colors[1][1]
+def test_color_study_levels(qapp):
+    from beeref.rboard import colorstudy
+    img = QtGui.QImage(64, 32, QtGui.QImage.Format.Format_RGB32)
+    for x in range(64):
+        for y in range(32):
+            img.setPixelColor(x, y, QtGui.QColor('#c03020' if x < 32
+                                                 else '#2050c0'))
+    result = colorstudy.study(img)
+    value_img, values = result['value']
+    color_img, colors = result['color']
+    assert value_img.size() == color_img.size()
+    # True value: each level is the grey of the region's real lightness
+    for hex_, share, lightness in values:
+        r, g, b = analysis.from_hex(hex_)
+        assert r == g == b
+        assert abs(analysis.rgb_to_lab((r, g, b))[0] - lightness) < 1.5
+    assert {analysis.lch(h)[2] // 90 for h, *_ in colors[:2]} == {0, 3}
+    assert abs(sum(s for _, s, _ in colors) - 1) < 1e-6
 
 
 def test_dhash_matches_resized_copy(qapp):
@@ -85,13 +104,11 @@ def test_dhash_matches_resized_copy(qapp):
     assert analysis.hamming(a['dhash'], c['dhash']) > 5
 
 
-def test_posterize_levels(qapp):
-    img = QtGui.QImage(256, 1, QtGui.QImage.Format.Format_RGB32)
-    for x in range(256):
-        img.setPixelColor(x, 0, QtGui.QColor(x, x, x))
-    out = analysis.posterize(img, 4)
-    values = {out.pixelColor(x, 0).red() for x in range(256)}
-    assert values == {0, 85, 170, 255}
+def test_majority_filter_removes_specks():
+    from beeref.rboard import colorstudy
+    labels = np.zeros((20, 20), int)
+    labels[10, 10] = 1
+    assert colorstudy.majority(labels, 2).max() == 0
 
 
 # ---------- layouts ----------
@@ -299,14 +316,29 @@ def add_images(view, colors):
     return items
 
 
-def test_arrange_by_color_is_undoable(view):
+def test_sort_by_colour(view):
+    from beeref.rboard.ui.colorsort import ColorSortDialog
     items = add_images(view, ['#0000ff', '#808080', '#ff0000', '#00ff00'])
+    view.rb_analyze(items)
+    dialog = ColorSortDialog(view, items)
+    assert dialog.count.text() == '3 of 4 images pass'  # grey is out
+    order = dialog.result_images()
+    assert [i.filename for i in order] == ['2.png', '3.png', '0.png']
+    dialog.mode.setCurrentIndex(list(colorsort_modes()).index('lightness'))
+    dialog.slider.setValue(0)
+    assert len(dialog.result_images()) == 4
     before = [i.pos() for i in items]
-    view.on_action_arrange_color_dominant()
-    order = sorted(items, key=lambda i: (i.pos().y(), i.pos().x()))
-    assert [i.filename for i in order] == ['2.png', '3.png', '0.png', '1.png']
+    with patch.object(ColorSortDialog, 'exec', return_value=1), \
+            patch.object(ColorSortDialog, 'result_images',
+                         return_value=order):
+        view.on_action_sort_color()
     view.undo_stack.undo()
     assert [i.pos() for i in items] == before
+
+
+def colorsort_modes():
+    from beeref.rboard.ui.colorsort import MODES
+    return MODES
 
 
 @pytest.mark.parametrize('action', ['justified', 'masonry', 'grid'])
@@ -319,17 +351,17 @@ def test_layout_actions_undo(view, action):
     assert [(i.pos(), i.scale()) for i in items] == before
 
 
-def test_view_palette_is_kept_with_the_image(view):
-    a, b = add_images(view, ['#ff0000', '#0000ff'])
-    view.settings.setValue('Items/palette_size', 2)
-    colors = view.rb_palette([a])
-    assert colors[0][0] == '#ff0000'
-    assert a.meta['palette']['colors'] == [list(c) for c in colors]
-    # Shift+P shows the palette in a menu instead of adding an item
-    a.setSelected(True)
-    view.on_action_generate_palette()
-    rows = [r.label for r in view.menu_host.menus[0].rows]
-    assert '#ff0000' in rows and 'copy all hex codes' in rows
+def test_color_study_cycles_and_menu_shows_codes(view):
+    a, = add_images(view, ['#ff0000'])
+    view.on_action_color_study()
+    assert a.study_mode == 'value'
+    entries = view.rb_study_entries(a, [a])
+    labels = [e[1] for e in entries if e[0] == 'item']
+    assert 'copy all hex codes' in labels
+    view.on_action_color_study()
+    assert a.study_mode == 'color'
+    view.on_action_color_study()
+    assert a.study_mode is None
     assert not [i for i in view.scene.items_for_save()
                 if isinstance(i, BeePaletteItem)]
 
@@ -354,16 +386,6 @@ def test_search_matches_ocr_text_and_notes(view):
     assert set(view.scene.selectedItems(user_only=True)) == {a, note}
     view.rb_search('lining silver')
     assert view.scene.selectedItems(user_only=True) == [a]
-
-
-def test_value_study_toggle(view):
-    item, = add_images(view, ['#336699'])
-    view.on_action_value_study(True)
-    assert view.scene.value_study_levels == 4
-    pm = item.value_study_pixmap(4)
-    assert not pm.isNull()
-    view.on_action_value_study(False)
-    assert view.scene.value_study_levels == 0
 
 
 def test_set_item_meta_undo(view):

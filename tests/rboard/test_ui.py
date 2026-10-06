@@ -204,7 +204,7 @@ def test_subboard_cache_and_discard(view, qtbot):
     item = board.window.view.rb_images()[0]
     item.setPos(1234, 567)
     board.window.close()
-    assert board.state == 'cached'
+    assert board.state == 'closed'
     view.subboards.show(board)
     restored = [i for i in board.window.view.rb_images()
                 if i.link_source is item.link_source][0]
@@ -257,7 +257,7 @@ def test_right_click_menus(view):
     view.rb_context_menu(centre)
     menu = view.menu_host.menus[0]
     labels = [r.label for r in menu.rows]
-    assert labels[:2] == ['tags', 'view palette']
+    assert labels[0] == 'tags'
     assert 'add note…' in labels and 'delete' in labels
     assert item.isSelected()
     # One tags list: main tags, your tags, then the rest
@@ -529,7 +529,8 @@ def test_kept_boards_and_trees_come_back(view, tmp_path):
     scratch = view.subboards.open_attribute('color:blue', 'blue',
                                             view.rb_images())
     for board in list(view.subboards.boards):
-        board.window.close()
+        if board.window:  # a small window reuses areas
+            board.window.close()
     data = view.subboards.snapshot()
     assert [d['title'] for d in data] == ['red', 'links · 0.png']
     assert scratch not in [d['title'] for d in data]
@@ -558,5 +559,84 @@ def test_layers_menu_lists_boards(view):
     board = view.subboards.boards[0]
     sub = [r.label for r in OverlayMenu(
         view, view.rb_board_entries(board)).rows]
-    assert sub[:2] == ['open', 'keep in this board file']
+    assert sub[:3] == ['show', 'pop out to a window',
+                       'keep in this board file']
     board.window.close()
+
+
+# ---------- areas (Blender-style window splits) ----------
+
+def test_subboard_docks_in_an_area_and_pops_out(view, main_window):
+    main_window.resize(1600, 900)
+    screen = main_window.screen
+    screen.resize(1600, 900)
+    add_images(view, [('#e02020', 60, 40), ('#2040d0', 60, 40)])
+    board = open_board(view)
+    assert board.state == 'area' and len(screen.areas) == 2
+    area = screen.area_of(board)
+    assert area.rect_[0] > 0.4 and screen.main_area().rect_[2] == area.rect_[0]
+    view.subboards.pop_out(board)
+    assert board.state == 'window' and len(screen.areas) == 1
+    view.subboards.dock(board)
+    assert board.state == 'area' and len(screen.areas) == 2
+    board.window.close()
+    assert board.state == 'closed' and len(screen.areas) == 1
+
+
+def test_area_split_join_swap_resize(view, main_window):
+    screen = main_window.screen
+    screen.resize(1600, 900)
+    main = screen.main_area()
+    new = screen.split(main, 'y', QtCore.QPointF(800, 600), new_side=3)
+    assert main.rect_ == [0, 0, 1, 600 / 900] and new.rect_[1] == 600 / 900
+    assert screen.neighbour_side(main, new) == 'down'
+    # Resize the border, with Ctrl-style snapping done by the caller
+    edges = screen.edges_on('y', main.rect_[3], 0.5)
+    screen.move_edges('y', edges, 0.5)
+    assert main.rect_[3] == 0.5 == new.rect_[1]
+    screen.swap(main, new)
+    assert new.is_main() and not main.is_main()
+    screen.join(new, main)
+    assert len(screen.areas) == 1 and screen.areas[0].rect_ == [0, 0, 1, 1]
+    assert screen.areas[0].is_main()
+
+
+def test_area_maximize_and_layout_saved(view, main_window):
+    screen = main_window.screen
+    screen.resize(1600, 900)
+    add_images(view, [('#e02020', 60, 40)])
+    view.rb_analyze(view.rb_images())
+    board = view.subboards.open_query(
+        'red', {'include': ['red'], 'exclude': [], 'mode': 'all'},
+        view.rb_images())
+    view.rb_keep_board(board, True)
+    area = screen.area_of(board)
+    screen.toggle_maximize(area)
+    assert not screen.main_area().isVisible()
+    screen.toggle_maximize()
+    layout = screen.snapshot(view.subboards.kept_boards())
+    assert sorted(str(a['shows']) for a in layout) == ['0', 'main']
+    data = view.subboards.snapshot()
+    view.subboards.clear()
+    assert len(screen.areas) == 1
+    view.subboards.restore(data, view.rb_images())
+    screen.restore(layout, view.subboards.restored)
+    assert len(screen.areas) == 2
+    assert view.subboards.boards[0].state == 'area'
+
+
+def test_export_selection_only_has_the_selection(view, tmp_path):
+    a, b, c = add_images(view, [('#e02020', 60, 40), ('#2040d0', 60, 40),
+                                ('#20a040', 60, 40)])
+    from beeref.fileio.export import SceneToPixmapExporter
+    exporter = SceneToPixmapExporter(view.scene, items=[a, c])
+    exporter.size = exporter.default_size
+    path = str(tmp_path / 'sel.png')
+    exporter.export(path)
+    img = QtGui.QImage(path)
+    # a and c with the gap between them, but no blue from b
+    assert img.width() > 400
+    colors = {img.pixelColor(x, img.height() // 2).name()
+              for x in range(0, img.width(), 5)}
+    assert '#2040d0' not in colors and '#e02020' in colors
+    assert b.isVisible()
