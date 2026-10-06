@@ -233,7 +233,10 @@ class ContentMixin:
 
     def on_action_group_content(self):
         self.cancel_active_modes()
-        items = self.rb_selected(images_only=True) or self.rb_images()
+        view, how = self.rb_selection_target()
+        if view is not self:
+            return view.on_action_group_content()
+        items = self.rb_selected(images_only=True)
         if len(items) < 2:
             self.rb_notify('add some images first')
             return

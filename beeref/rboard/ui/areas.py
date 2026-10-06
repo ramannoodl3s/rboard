@@ -327,6 +327,24 @@ class Screen(QtWidgets.QWidget):
         self.menu_host = MenuHost(self)
         first = self.add_area([0, 0, 1, 1])
         first.set_content(main_view)
+        # Drop any half-finished border drag or gesture when the window
+        # loses focus (a missed mouse release would leave it stuck)
+        parent.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Type.WindowDeactivate:
+            self.reset_pointer()
+        return False
+
+    def reset_pointer(self):
+        """End any border drag, split or corner gesture and put the
+        normal cursor back."""
+        if self.border is not None:
+            self.border = None
+            self.changed.emit()
+        if self.split_mode or self.gesture:
+            self.cancel_gesture()
+        self.unsetCursor()
 
     # ---------- basics ----------
 
@@ -442,11 +460,22 @@ class Screen(QtWidgets.QWidget):
             area.rect_[index] = value
         self.relayout()
 
+    def leaveEvent(self, e):
+        # The pointer went onto an area (or out of the window): the
+        # border's resize cursor mustn't stay on over the boards
+        if self.border is None and not self.split_mode:
+            self.unsetCursor()
+
     def mouseMoveEvent(self, e):
         pos = e.position()
         if self.split_mode:
             self.split_preview(pos)
             return
+        if self.border is not None and \
+                not e.buttons() & Qt.MouseButton.LeftButton:
+            # The release went somewhere else: the drag is over
+            self.border = None
+            self.changed.emit()
         if self.border is not None:
             axis, edges, _ = self.border
             size = self.width() if axis == 'x' else self.height()
@@ -785,8 +814,13 @@ class Screen(QtWidgets.QWidget):
                  'hint': 'in another area' if shown and shown is not area
                  else ('window' if board.window else '')}))
         entries += [('sep',),
-                    ('action', 'new_subboard', 'new sub board…'),
-                    ('sep',), ('label', 'area')]
+                    ('action', 'new_subboard', 'new sub board…')]
+        board = getattr(area.content, 'board', None)
+        if board is not None:
+            from beeref.rboard.subboard_window import edit_description
+            entries.append(('item', 'description…',
+                            lambda: edit_description(self.main_view, board)))
+        entries += [('sep',), ('label', 'area')]
         entries += self.area_entries(area)
         menu = OverlayMenu(self, entries, min_width=240)
         self.menu_host.show(menu, area.mapTo(self, QtCore.QPoint(

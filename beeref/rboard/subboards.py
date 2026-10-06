@@ -72,6 +72,7 @@ class SubBoard:
         self.rows = None          # [[sources]] for a link tree, top down
         self.rule = None          # query: {'include', 'exclude', 'mode'}
         self.saved = False        # kept in the board file
+        self.description = ''     # shown above the board; links work
         self.window = None
 
     @property
@@ -191,6 +192,7 @@ class SubBoardManager(QtCore.QObject):
                 'title': board.title, 'key': board.key,
                 'saved': board.saved, 'rule': board.rule,
                 'sources': [links.uid(s) for s in self.live_sources(board)],
+                'description': board.description,
                 'parent': kept.index(board.parent)
                 if board.parent in kept else None,
             }
@@ -225,6 +227,7 @@ class SubBoardManager(QtCore.QObject):
                 board = SubBoard(entry['title'], entry['key'],
                                  items(entry['sources']), parent)
                 board.saved = bool(entry.get('saved'))
+                board.description = entry.get('description') or ''
                 board.rule = entry.get('rule')
                 if board.rule:  # queries pick up new matching images
                     board.sources = query_matches(board.rule, images)
@@ -355,6 +358,20 @@ class SubBoardManager(QtCore.QObject):
             if board.window:
                 board.window.view.scene.update()
         self.main_view.scene.update()
+
+
+def describe(manager, board, text):
+    """Set a board's description (undoable, so the board file shows it's
+    changed)."""
+    old = board.description
+
+    def apply(value):
+        board.description = value
+        if board.window is not None:
+            board.window.refresh_description()
+
+    manager.main_view.undo_stack.push(ManagerChange(
+        'Describe sub board', lambda: apply(text), lambda: apply(old)))
 
 
 class ManagerChange(QtGui.QUndoCommand):

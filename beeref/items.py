@@ -221,15 +221,57 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             data['rboard'] = self.meta
         return data
 
-    def color_study(self):
-        """R Board colour study of the visible part of the image (see
-        beeref.rboard.colorstudy), computed when first shown."""
-        key = (self.crop.getRect(), bool(self.grayscale))
-        if self._study_cache is None or self._study_cache[0] != key:
-            from beeref.rboard import colorstudy
-            img = self.visible_image()
-            self._study_cache = (key, colorstudy.study(img, self.grayscale))
-        return self._study_cache[1]
+    def study_key(self):
+        return (self.crop.getRect(), bool(self.grayscale), self.study_mode,
+                self.study_levels)
+
+    def study_estimate(self):
+        from beeref.rboard import colorstudy
+        return colorstudy.estimate(self.crop.width(), self.crop.height(),
+                                   self.study_levels)
+
+    def study_source(self):
+        """The visible part, sharp enough for the study's working size."""
+        from beeref.rboard import colorstudy
+        w, h = self.crop.width(), self.crop.height()
+        side = colorstudy.work_side(w, h)
+        return self.visible_image(round(side * min(w, h) / max(w, h, 1)))
+
+    def color_study(self, start=True, background=None):
+        """R Board colour study of the visible part, in the current
+        study mode and levels (see beeref.rboard.colorstudy): (QImage,
+        levels) or None while it's still being worked out. Short ones
+        are worked out at once; ones estimated over a second (or all of
+        them, with background=True) on another thread."""
+        if not self.study_mode:
+            return None
+        key = self.study_key()
+        cache = self._study_cache or {}
+        if key in cache or not start:
+            return cache.get(key)
+        from beeref.rboard import colorstudy
+        if background is None:
+            background = self.study_estimate() > colorstudy.BACKGROUND_AFTER
+        if background:
+            colorstudy.runner().start(
+                self, key, self.study_source, self.grayscale,
+                self.study_mode, self.study_levels)
+            return None
+        self.store_study(key, colorstudy.study(
+            self.study_source(), self.grayscale, self.study_mode,
+            self.study_levels))
+        return self._study_cache[key]
+
+    def store_study(self, key, result):
+        cache = dict(self._study_cache or {})
+        cache[key] = result
+        # Keep the last couple (switching modes back and forth is free)
+        self._study_cache = dict(list(cache.items())[-2:])
+        self.update()
+
+    def study_progress(self):
+        from beeref.rboard import colorstudy
+        return colorstudy.runner().progress(self)
 
     def get_filename_for_export(self, imgformat, save_id_default=None):
         save_id = self.save_id or save_id_default
@@ -286,6 +328,8 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         source.items.append(weakref.ref(self))
         self._study_cache = None
         self.study_mode = None  # R Board colour study: 'value'/'color'
+        from beeref.rboard import colorstudy
+        self.study_levels = colorstudy.last_levels
         self.reset_crop()
 
     def is_null(self):
@@ -524,13 +568,13 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
                 self.draw_crop_rect(painter, handle())
             self.draw_crop_rect(painter, self.crop_temp)
         else:
-            if self.study_mode:
+            study = self.color_study() if self.study_mode else None
+            if study is not None:
                 # Flat regions, drawn blocky on purpose
-                overlay = self.color_study()[self.study_mode][0]
                 painter.save()
                 painter.setRenderHint(
                     QtGui.QPainter.RenderHint.SmoothPixmapTransform, False)
-                painter.drawImage(self.crop, overlay)
+                painter.drawImage(self.crop, study[0])
                 painter.restore()
             else:
                 self.draw_image(painter, self.crop)
@@ -552,6 +596,14 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             return
         t = painter.combinedTransform()
         scale = (t.m11() ** 2 + t.m12() ** 2) ** 0.5
+        key = (scale, source.version, self.grayscale, id(source))
+        cached = getattr(self, '_draw_cache', None)
+        if cached and cached[0] == key and not imagestore._exact:
+            # Same zoom and copies as last time: same choice
+            _, width, img = cached
+            imagestore.store().touch(source, width)
+            painter.drawImage(rect, img, self._source_rect(rect, img))
+            return
         wanted = source.wanted_width(scale)
         if imagestore._exact:
             width, img = wanted, source.level(wanted)
@@ -564,11 +616,15 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             imagestore.store().touch(source, width)
         if self.grayscale:
             img = self._gray(width, img)
-        rx = img.width() / source.width
-        ry = img.height() / source.height
-        painter.drawImage(rect, img, QtCore.QRectF(
-            rect.x() * rx, rect.y() * ry, rect.width() * rx,
-            rect.height() * ry))
+        if not imagestore._exact and width >= wanted:
+            self._draw_cache = (key, width, img)
+        painter.drawImage(rect, img, self._source_rect(rect, img))
+
+    def _source_rect(self, rect, img):
+        rx = img.width() / self.source.width
+        ry = img.height() / self.source.height
+        return QtCore.QRectF(rect.x() * rx, rect.y() * ry,
+                             rect.width() * rx, rect.height() * ry)
 
     def enter_crop_mode(self):
         logger.debug(f'Entering crop mode on {self}')

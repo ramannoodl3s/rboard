@@ -64,6 +64,13 @@ class MainControlsMixin:
         if hasattr(self, 'disable_mouse_events'):
             self.disable_mouse_events()
 
+    def focusOutEvent(self, event):
+        # R Board: moving the window ends when focus goes elsewhere, so
+        # the move cursor can't get stuck
+        if getattr(self, 'movewin_active', False):
+            self.exit_movewin_mode()
+        super().focusOutEvent(event)
+
     def exit_movewin_mode(self):
         logger.debug('Exiting movewin mode')
         self.setMouseTracking(False)

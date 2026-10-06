@@ -30,6 +30,10 @@ from beeref import utils
 
 
 commandline_args = CommandlineArgs()
+# Read once: paint_debug runs for every item on every redraw
+_DEBUG_DRAWING = bool(commandline_args.debug_shapes
+                      or commandline_args.debug_boundingrects
+                      or commandline_args.debug_handles)
 logger = logging.getLogger(__name__)
 SELECT_COLOR = QtGui.QColor(*COLORS['Scene:Selection'])
 
@@ -200,6 +204,8 @@ class SelectableMixin(BaseItemMixin):
             painter.fillPath(shape, color)
 
     def paint_debug(self, painter, option, widget):
+        if not _DEBUG_DRAWING:
+            return
         if commandline_args.debug_shapes:
             self.draw_debug_shape(painter, self.shape(), 255, 0, 0)
         if commandline_args.debug_boundingrects:
@@ -227,8 +233,10 @@ class SelectableMixin(BaseItemMixin):
         painter.setPen(pen)
         painter.setBrush(QtGui.QBrush())
 
-        # Draw the main selection rectangle
-        painter.drawRect(self.bounding_rect_unselected())
+        # Draw the main selection rectangle, inside the item's edge
+        inset = self.fixed_length_for_viewport(self.SELECT_LINE_WIDTH / 2)
+        painter.drawRect(self.bounding_rect_unselected().adjusted(
+            inset, inset, -inset, -inset))
 
         # If it's a single selection, draw the handles:
         if self.has_selection_handles():
@@ -344,7 +352,10 @@ class SelectableMixin(BaseItemMixin):
         ]
 
     def boundingRect(self):
-        if not self.has_selection_outline():
+        # R Board: only an item with handles (a single selection) grows;
+        # a selection outline is drawn inside the item, so selecting
+        # many items doesn't change (and re-index) every one of them
+        if not self.has_selection_handles():
             return self.bounding_rect_unselected()
 
         # Add extra space for the interactive areas
@@ -615,7 +626,10 @@ class SelectableMixin(BaseItemMixin):
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemSelectedChange:
-            self.prepareGeometryChange()
+            # Handles come and go with a single selection: the scene
+            # updates that item's geometry (on_selection_change)
+            if self.has_selection_handles():
+                self.prepareGeometryChange()
             if hasattr(self, 'on_selected_change'):
                 self.on_selected_change(value)
         return super().itemChange(change, value)

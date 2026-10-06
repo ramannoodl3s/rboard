@@ -96,8 +96,89 @@ def _run_pureref(filename, worker):
     worker.finished.emit(filename, [])
 
 
+class _Selections:
+    """Which board holds the current selection, and the last non-empty
+    selection (any board), for selection actions started from another
+    board's bar."""
+    active = None   # weak ref to the view whose selection is current
+    last = None     # (weak ref to its view, [weak refs to its items])
+
+
+_selections = _Selections()
+
+
+def _alive_scene(view):
+    try:
+        return view.scene if view is not None else None
+    except RuntimeError:
+        return None   # the board was closed
+
+
 class RBoardMixin:
     """Mixed into BeeGraphicsView."""
+
+    # ---------- the selection that actions work on ----------
+
+    def rb_note_selection(self):
+        import weakref
+        try:
+            items = self.scene.selectedItems(user_only=True)
+        except RuntimeError:
+            return
+        if items:
+            _selections.active = weakref.ref(self)
+            _selections.last = (weakref.ref(self),
+                                [weakref.ref(i) for i in items])
+        elif _selections.active is not None and \
+                _selections.active() is self:
+            _selections.active = None
+
+    def rb_selection_target(self, apply=True):
+        """Where selection actions run, as (view, how): the board with
+        the current selection ('selection'); else the last selection,
+        selected again ('last'); else everything on this board ('all').
+        With apply=False nothing is selected (for menu labels)."""
+        view = _selections.active() if _selections.active else None
+        scene = _alive_scene(view)
+        if scene is not None and scene.selectedItems(user_only=True):
+            return view, 'selection'
+        if _selections.last:
+            view = _selections.last[0]()
+            scene = _alive_scene(view)
+            items = []
+            if scene is not None:
+                for ref in _selections.last[1]:
+                    item = ref()
+                    try:
+                        if item is not None and item.scene() is scene:
+                            items.append(item)
+                    except RuntimeError:
+                        pass
+            if items:
+                if apply:
+                    blocked = scene.blockSignals(True)
+                    try:
+                        scene.clearSelection()
+                        for item in items:
+                            item.setSelected(True)
+                    finally:
+                        scene.blockSignals(blocked)
+                    scene.selectionChanged.emit()
+                return view, 'last'
+        if not list(self.scene.items_for_save()):
+            return self, None
+        if apply:
+            self.scene.select_all_items()
+        return self, 'all'
+
+    def rb_run_on_selection(self, action_id):
+        """Run a selection action where the selection is (see
+        rb_selection_target)."""
+        view, how = self.rb_selection_target()
+        if how is None:
+            self.rb_notify('add some images first')
+            return
+        view.bee_qactions[action_id].trigger()
 
     # ---------- helpers ----------
 
@@ -242,11 +323,25 @@ class RBoardMixin:
 
     # ---------- colour study and sorting ----------
 
-    def rb_set_study(self, images, mode):
+    def rb_set_study(self, images, mode, levels=None):
         """Show the colour study ('value', 'color' or None = off) on
-        images."""
+        images, optionally with a new number of levels. Worked out at
+        once if that's quick for all of them together, else in the
+        background (the images show as usual until each is ready)."""
+        from beeref.rboard import colorstudy
+        if levels is not None:
+            colorstudy.last_levels = levels
         for item in images:
             item.study_mode = mode
+            if levels is not None:
+                item.study_levels = levels
+        if mode:
+            total = sum(i.study_estimate() for i in images
+                        if i.color_study(start=False) is None)
+            background = total > colorstudy.BACKGROUND_AFTER
+            for item in images:
+                item.color_study(background=background)
+        for item in images:
             item.update()
 
     def on_action_color_study(self):
@@ -266,7 +361,10 @@ class RBoardMixin:
     def on_action_sort_color(self):
         from beeref.rboard.ui.colorsort import ColorSortDialog
         self.cancel_active_modes()
-        images = self.rb_selected(images_only=True) or self.rb_images()
+        view, how = self.rb_selection_target()
+        if view is not self:
+            return view.on_action_sort_color()
+        images = self.rb_selected(images_only=True)
         if len(images) < 2:
             self.rb_notify('add some images first')
             return

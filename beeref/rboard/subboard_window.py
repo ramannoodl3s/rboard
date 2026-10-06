@@ -7,7 +7,9 @@
 
 """The window a sub board opens in."""
 
+import html
 import logging
+import re
 
 from PyQt6 import QtCore, QtWidgets
 
@@ -98,6 +100,10 @@ class SubBoardView(BeeGraphicsView):
 
 
 class BoardContent:
+
+    def refresh_description(self):
+        self.description.refresh(self.board.description)
+
     """Filling a sub board's view with linked copies, and remembering
     its layout. Shared by sub boards in areas and in their own windows."""
 
@@ -261,6 +267,67 @@ class BoardContent:
                 if getattr(i, 'is_header', False)]
 
 
+URL = re.compile(r'(https?://[^\s<>"]+|www\.[^\s<>"]+)')
+
+
+def linked_html(text):
+    """Plain text -> HTML with web addresses as clickable links."""
+    out = []
+    for i, part in enumerate(URL.split(text)):
+        if i % 2:
+            href = part if part.startswith('http') else 'https://' + part
+            # Trailing punctuation belongs to the sentence, not the link
+            trail = ''
+            while href[-1] in '.,;:!?)\'"' and len(href) > 8:
+                trail = href[-1] + trail
+                href, part = href[:-1], part[:-1]
+            out.append(f'<a href="{html.escape(href, quote=True)}">'
+                       f'{html.escape(part)}</a>{html.escape(trail)}')
+        else:
+            out.append(html.escape(part))
+    return ''.join(out).replace('\n', '<br>')
+
+
+class DescriptionStrip(QtWidgets.QLabel):
+    """A sub board's description above it; links open in the browser and
+    a double-click edits it."""
+
+    def __init__(self, content):
+        super().__init__()
+        self.content = content
+        self.setWordWrap(True)
+        self.setOpenExternalLinks(True)
+        self.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.setContentsMargins(12, 6, 12, 6)
+        self.setToolTip('double-click to edit')
+
+    def refresh(self, text):
+        from beeref.rboard.ui.theme import tm
+        self.setStyleSheet(
+            f'QLabel {{ background: {tm().hex("surface")}; '
+            f'color: {tm().hex("ink")}; '
+            f'border-bottom: 1px solid {tm().hex("divider")}; }}')
+        accent = tm().hex('accent')
+        self.setText(linked_html(text).replace(
+            '<a href', f'<a style="color: {accent}" href'))
+        self.setVisible(bool(text.strip()))
+
+    def mouseDoubleClickEvent(self, event):
+        edit_description(self.content.view, self.content.board)
+
+
+def edit_description(view, board):
+    text, ok = QtWidgets.QInputDialog.getMultiLineText(
+        view, 'description',
+        f'a note for "{board.title}" (web links become clickable):',
+        board.description)
+    if ok and text != board.description:
+        from beeref.rboard.subboards import describe
+        describe(view.rb_manager(), board, text.strip())
+
+
 class SubBoardWindow(QtWidgets.QMainWindow, BoardContent):
     """A sub board in its own window."""
 
@@ -274,7 +341,15 @@ class SubBoardWindow(QtWidgets.QMainWindow, BoardContent):
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         app = QtWidgets.QApplication.instance()
         self.view = SubBoardView(app, self, manager, board)
-        self.setCentralWidget(self.view)
+        central = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.description = DescriptionStrip(self)
+        layout.addWidget(self.description)
+        layout.addWidget(self.view, 1)
+        self.setCentralWidget(central)
+        self.refresh_description()
         geo = main_window.geometry()
         self.resize(max(480, int(geo.width() * 0.7)),
                     max(360, int(geo.height() * 0.7)))
@@ -316,7 +391,11 @@ class DockedBoard(QtWidgets.QWidget, BoardContent):
         self.view.setParent(self)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.view)
+        layout.setSpacing(0)
+        self.description = DescriptionStrip(self)
+        layout.addWidget(self.description)
+        layout.addWidget(self.view, 1)
+        self.refresh_description()
         board.window = self
         # Stay fitted to the area until you zoom or pan yourself
         self.keep_fitted = True

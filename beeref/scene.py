@@ -50,6 +50,13 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         # R Board: the user items that are selected, kept between
         # selection changes (every selected item asks while it's drawn)
         self._user_selection = None
+        self._handle_item = None   # the single selected item, if any
+        self._handle_rect = None
+        self._rubberband_to = None
+        self._rubberband_timer = QtCore.QTimer()
+        self._rubberband_timer.setSingleShot(True)
+        self._rubberband_timer.setInterval(15)
+        self._rubberband_timer.timeout.connect(self._apply_rubberband)
         self.selectionChanged.connect(self._forget_selection)
         self.selectionChanged.connect(self.on_selection_change)
         self.changed.connect(self.on_change)
@@ -63,6 +70,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def clear(self):
         self._clear_ongoing = True
         self._user_selection = None
+        self._handle_item = self._handle_rect = None
         super().clear()
         self.internal_clipboard = []
         self.rubberband_item = RubberbandItem()
@@ -357,12 +365,18 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def has_single_selection(self):
         """Checks whether there's currently exactly one item selected."""
 
-        return len(self.selectedItems(user_only=True)) == 1
+        return self.selection_count() == 1
 
     def has_multi_selection(self):
         """Checks whether there are currently more than one items selected."""
 
-        return len(self.selectedItems(user_only=True)) > 1
+        return self.selection_count() > 1
+
+    def selection_count(self):
+        """How many user items are selected (no list copy)."""
+        if self._user_selection is None:
+            self.selectedItems(user_only=True)
+        return len(self._user_selection)
 
     def has_single_image_selection(self):
         """Checks whether the current selection is a single image."""
@@ -423,13 +437,26 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 logger.debug('Activating rubberband selection')
                 self.addItem(self.rubberband_item)
                 self.rubberband_item.bring_to_front()
-            self.rubberband_item.fit(self.event_start, event.scenePos())
-            self.setSelectionArea(self.rubberband_item.shape())
-            self.views()[0].reset_previous_transform()
+            # R Board: the mouse can send hundreds of moves a second;
+            # update the selection at most once per frame
+            self._rubberband_to = event.scenePos()
+            if not self._rubberband_timer.isActive():
+                self._rubberband_timer.start()
         super().mouseMoveEvent(event)
+
+    def _apply_rubberband(self):
+        if self._rubberband_to is None or \
+                self.active_mode != self.RUBBERBAND_MODE:
+            return
+        self.rubberband_item.fit(self.event_start, self._rubberband_to)
+        self._rubberband_to = None
+        self.setSelectionArea(self.rubberband_item.shape())
+        self.views()[0].reset_previous_transform()
 
     def mouseReleaseEvent(self, event):
         if self.active_mode == self.RUBBERBAND_MODE:
+            self._rubberband_timer.stop()
+            self._apply_rubberband()
             self.end_rubberband_mode()
         if (self.active_mode == self.MOVE_MODE
                 and self.has_selection()
@@ -505,17 +532,15 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         if not base:
             return QtCore.QRectF(0, 0, 0, 0)
 
-        x = []
-        y = []
-
-        for item in base:
-            for corner in item.corners_scene_coords:
-                x.append(corner.x())
-                y.append(corner.y())
-
+        # R Board: one Qt call per item (the box around its mapped
+        # corners), not four Python point mappings
+        rects = [item.mapRectToScene(item.bounding_rect_unselected())
+                 for item in base]
         return QtCore.QRectF(
-            QtCore.QPointF(min(x), min(y)),
-            QtCore.QPointF(max(x), max(y)))
+            QtCore.QPointF(min(r.left() for r in rects),
+                           min(r.top() for r in rects)),
+            QtCore.QPointF(max(r.right() for r in rects),
+                           max(r.bottom() for r in rects)))
 
     def get_selection_center(self):
         rect = self.itemsBoundingRect(selection_only=True)
@@ -526,6 +551,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             # Ignore events while clearing the scene since the
             # multiselect item will get cleared, too
             return
+        self._update_handle_item()
         if self.has_multi_selection():
             self.multi_select_item.fit_selection_area(
                 self.itemsBoundingRect(selection_only=True))
@@ -534,6 +560,24 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             self.multi_select_item.bring_to_front()
         if not self.has_multi_selection() and self.multi_select_item.scene():
             self.removeItem(self.multi_select_item)
+
+    def _update_handle_item(self):
+        """R Board: a single selected item shows handles and so a bigger
+        bounding rect; tell Qt when that item changes."""
+        selected = self.selectedItems(user_only=True)
+        new = selected[0] if len(selected) == 1 else None
+        old = self._handle_item
+        if new is old:
+            return
+        if old is not None and old.scene() is self:
+            old.prepareGeometryChange()
+            if self._handle_rect is not None:
+                self.update(self._handle_rect)   # where its handles were
+        self._handle_item = new
+        self._handle_rect = None
+        if new is not None:
+            new.prepareGeometryChange()
+            self._handle_rect = new.sceneBoundingRect()
 
     def on_change(self, region):
         if self._clear_ongoing:

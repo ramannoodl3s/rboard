@@ -362,7 +362,18 @@ class OverlayMenu(QtWidgets.QWidget):
                 QtGui.QKeySequence.SequenceFormat.NativeText)
             callback, enabled = qa.trigger, qa.isEnabled()
             scene = getattr(self.host, 'scene', None)
-            if (opts.get('all_if_none') and not enabled
+            target = getattr(self.host, 'rb_selection_target', None)
+            if opts.get('all_if_none') and target is not None:
+                # R Board: run on the board where the selection is;
+                # with none, on the last selection, else everything
+                view, how = target(apply=False)
+                if how is not None:
+                    callback = (lambda a=entry[1]:
+                                self.host.rb_run_on_selection(a))
+                    enabled = True
+                    label += {'last': ' (last selection)',
+                              'all': ' (all)'}.get(how, '')
+            elif (opts.get('all_if_none') and not enabled
                     and scene is not None and scene.items()):
                 # Work on every item when nothing is selected
                 callback = self._select_all_then(action.callback)

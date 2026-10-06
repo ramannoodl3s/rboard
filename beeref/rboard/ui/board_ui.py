@@ -165,6 +165,70 @@ class StudyToggle(QtWidgets.QWidget):
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
 
 
+class StudyLevels(QtWidgets.QWidget):
+    """The colour study's number of levels, under its switches; a thin
+    progress bar takes its place while slow studies are worked out."""
+
+    def __init__(self, menu, targets, on_levels, on_ready):
+        super().__init__()
+        from beeref.rboard import colorstudy
+        self.targets = targets
+        self.on_ready = on_ready
+        self.setFixedHeight(ROW_H + 4)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(36, 0, 12, 0)
+        layout.setSpacing(10)
+        self.label = QtWidgets.QLabel()
+        self.slider = QtWidgets.QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(colorstudy.MIN_LEVELS, colorstudy.MAX_LEVELS)
+        self.slider.setValue(targets[0].study_levels)
+        self.slider.setToolTip('how many flat regions the study has')
+        self.bar = QtWidgets.QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(6)
+        layout.addWidget(self.label)
+        layout.addWidget(self.slider, 1)
+        layout.addWidget(self.bar, 1)
+        self.slider.valueChanged.connect(self.show_value)
+        # Applied on release, so dragging doesn't start a study per step
+        self.slider.sliderReleased.connect(
+            lambda: on_levels(self.slider.value()))
+        self.slider.valueChanged.connect(
+            lambda v: None if self.slider.isSliderDown() else on_levels(v))
+        self.timer = QtCore.QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.poll)
+        self.show_value(self.slider.value())
+        self.poll()
+
+    def preferred_width(self):
+        return 300
+
+    def show_value(self, value):
+        self.label.setText(f'{value} levels')
+
+    def progress(self):
+        values = [t.study_progress() for t in self.targets]
+        values = [v for v in values if v is not None]
+        return sum(values) / len(values) if values else None
+
+    def poll(self):
+        value = self.progress()
+        working = value is not None
+        self.slider.setVisible(not working)
+        self.bar.setVisible(working)
+        if working:
+            self.label.setText('working…')
+            self.bar.setValue(round(value * 100))
+            self.timer.start()
+        else:
+            if self.timer.isActive():
+                self.timer.stop()
+                self.on_ready()
+            self.show_value(self.slider.value())
+
+
 class NoteHover(QtCore.QObject):
     """Tracks which image with a note is under the pointer."""
 
@@ -213,6 +277,7 @@ class BoardUIMixin:
         self.status_timer.setInterval(150)
         self.status_timer.timeout.connect(self.rb_update_status)
         self.scene.selectionChanged.connect(self.status_timer.start)
+        self.scene.selectionChanged.connect(self.rb_note_selection)
         self.scene.changed.connect(self._rb_scene_changed)
         tm().changed.connect(self.rb_on_theme_changed)
         self.rb_on_theme_changed()
@@ -360,8 +425,6 @@ class BoardUIMixin:
                 ('action', 'arrange_square', 'in a square', ALL)]),
             ('sep',), ('label', 'content'),
             ('action', 'group_content', 'group by content…', ALL),
-            ('sep',), ('label', 'colour'),
-            ('action', 'sort_color', 'sort by colour…', SORT),
             ('sep',), ('label', 'size'),
             ('action', 'normalize_height', 'same height', ALL),
             ('action', 'normalize_width', 'same width', ALL),
@@ -561,6 +624,9 @@ class BoardUIMixin:
         else:
             entries.append(('item', 'pop out to a window',
                             lambda: manager.pop_out(board)))
+        entries.append(('item', 'description…',
+                        lambda: self.rb_describe_board(board),
+                        {'hint': 'has one' if board.description else ''}))
         if board.is_tree:
             entries.append(('item', 'trees are always kept', None,
                             {'enabled': False, 'checked': True}))
@@ -573,6 +639,10 @@ class BoardUIMixin:
                     ('item', 'remove', lambda: self.rb_remove_board(board),
                      {'danger': True})]
         return entries
+
+    def rb_describe_board(self, board):
+        from beeref.rboard.subboard_window import edit_description
+        edit_description(self, board)
 
     def rb_keep_board(self, board, saved):
         """Keep a sub board in the board file (undoable, so the board
@@ -758,11 +828,26 @@ class BoardUIMixin:
             if point is not None:  # show the menu again, with the codes
                 self.rb_context_menu(point)
 
+        def reopen():
+            point = getattr(self, '_rb_menu_point', None)
+            if point is not None:
+                self.rb_context_menu(point)
+
+        def set_levels(levels):
+            if levels != item.study_levels:
+                self.rb_set_study(targets, item.study_mode, levels)
+                # Rebuild the menu after the slider's own signal is done
+                QtCore.QTimer.singleShot(0, reopen)
+
         entries = [('widget', lambda m: StudyToggle(m, item.study_mode,
-                                                    pick))]
-        if not item.study_mode:
+                                                    pick)),
+                   ('widget', lambda m: StudyLevels(
+                       m, targets, set_levels,
+                       lambda: QtCore.QTimer.singleShot(0, reopen)))]
+        study = item.color_study(start=False) if item.study_mode else None
+        if study is None:
             return entries
-        levels = item.color_study()[item.study_mode][1]
+        levels = study[1]
 
         def copy(text, what):
             QtWidgets.QApplication.clipboard().setText(text)
@@ -833,6 +918,10 @@ class BoardUIMixin:
                             lambda: self.reveal_in_main(item),
                             {'icon': 'forward'}))
         selected = self.scene.selectedItems(user_only=True)
+        if item.isSelected() and len(selected) > 1:
+            entries.append(('action', 'sort_color',
+                            f'sort the {len(selected)} selected by colour…',
+                            {'icon': 'sort'}))
         if item.isSelected() and len(selected) > 1:
             entries.append(('action', 'export_selection',
                             f'export the {len(selected)} selected as one '

@@ -264,6 +264,7 @@ class Source:
         self.pending = set()
         self.gray = {}            # width -> grayscale QImage
         self.items = []           # weak refs of items showing it
+        self.version = 0          # bumped when copies come or go
 
     # -- creating --
 
@@ -444,6 +445,7 @@ class Store:
             return
         # Keyed by the requested width, which is what drawing asks for
         source.levels[width] = img
+        source.version += 1
         self.steps[(id(source), width)] = (source, time.monotonic())
         self.used += img.sizeInBytes()
         self.evict()
@@ -476,6 +478,7 @@ class Store:
     def drop(self, source, width):
         img = source.levels.pop(width, None)
         source.gray.pop(width, None)
+        source.version += 1
         if self.steps.pop((id(source), width), None) and img is not None:
             self.used -= img.sizeInBytes()
 

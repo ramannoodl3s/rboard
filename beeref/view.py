@@ -823,13 +823,12 @@ class BeeGraphicsView(MainControlsMixin,
             return
         logger.trace('Recalculating scene rectangle...')
         try:
-            topleft = self.mapFromScene(
-                self.scene.itemsBoundingRect().topLeft())
+            items_rect = self.scene.itemsBoundingRect()
+            topleft = self.mapFromScene(items_rect.topLeft())
             topleft = self.mapToScene(QtCore.QPoint(
                 topleft.x() - self.size().width(),
                 topleft.y() - self.size().height()))
-            bottomright = self.mapFromScene(
-                self.scene.itemsBoundingRect().bottomRight())
+            bottomright = self.mapFromScene(items_rect.bottomRight())
             bottomright = self.mapToScene(QtCore.QPoint(
                 bottomright.x() + self.size().width(),
                 bottomright.y() + self.size().height()))
