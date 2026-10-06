@@ -121,6 +121,12 @@ class BeeSettings(QtCore.QSettings):
             'default': 'best',
             'validate': lambda x: x in ('png', 'jpg', 'best'),
         },
+        'Items/image_quality': {
+            # R Board: see beeref/rboard/imagestore.py
+            'default': 'balanced',
+            'validate': lambda x: x in (
+                'performance', 'balanced', 'quality', 'full'),
+        },
         'Items/arrange_gap': {
             'default': 0,
             'cast': int,

@@ -73,6 +73,61 @@ def _unwrap(data):
     return db
 
 
+def _unwrap_to_file(path, out):
+    """Like _unwrap, but copies the database straight from the board file
+    into `out` in chunks, so the board is never held in memory twice."""
+    size = os.path.getsize(path)
+    with open(path, 'rb') as f:
+        def take(n):
+            b = f.read(n)
+            if len(b) < n:
+                raise PureRefError('Truncated field')
+            return b
+
+        def u32():
+            return struct.unpack('>I', take(4))[0]
+
+        def string():
+            n = u32()
+            return None if n == 0xFFFFFFFF else take(n).decode('utf-16-be')
+
+        def skip():
+            n = u32()
+            if n != 0xFFFFFFFF:
+                f.seek(n, 1)
+
+        version = string()
+        if version not in ('2.0', '2.1'):
+            raise PureRefError(
+                f'This board uses the PureRef {version} format. Open it in '
+                'PureRef 2 and save it once, then import it again.')
+        u32()
+        (db_size,) = struct.unpack('>Q', take(8))
+        skip()
+        skip()
+        if version != '2.0':
+            skip()  # thumbnail
+        header = f.tell()
+        if db_size < header or db_size + header != size:
+            raise PureRefError('The board file is damaged (bad header).')
+
+        def copy(start, end):
+            f.seek(start)
+            left = end - start
+            while left > 0:
+                chunk = f.read(min(left, 1 << 22))
+                if not chunk:
+                    raise PureRefError('Truncated field')
+                out.write(chunk)
+                left -= len(chunk)
+
+        f.seek(db_size)
+        if f.read(len(SQLITE_MAGIC)) != SQLITE_MAGIC:
+            raise PureRefError('The board file is damaged (no database).')
+        copy(db_size, size)
+        copy(header, db_size)
+
+
 def _cell(value):
     # Qt stores serialized values as Latin-1 strings in TEXT cells
     return value.encode('latin1') if isinstance(value, str) else bytes(value)
@@ -133,14 +188,29 @@ def read(path, on_progress=None):
     """Parse a .pur board.
 
     :returns: list of dicts. Images: {'type': 'image', 'data': bytes,
-        'crop': (x, y, w, h), 'transform': 3x3, 'name', 'z'}.
-        Notes: {'type': 'text', 'text', 'font_px', 'transform', 'z'}.
+        'crop': (x, y, w, h), 'transform': 3x3, 'name', 'z'} (items showing
+        the same image share one bytes object). Notes: {'type': 'text',
+        'text', 'font_px', 'transform', 'z'}.
     """
-    with open(path, 'rb') as f:
-        db_bytes = _unwrap(f.read())
-    db = sqlite3.connect(':memory:')
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False)
     try:
-        db.deserialize(db_bytes)
+        with tmp:
+            _unwrap_to_file(path, tmp)
+        db = sqlite3.connect(tmp.name)
+        try:
+            return _read_db(db, path, on_progress)
+        finally:
+            db.close()
+    finally:
+        try:
+            os.remove(tmp.name)
+        except OSError:
+            pass
+
+
+def _read_db(db, path, on_progress):
+    try:
         items = {row[0]: row for row in db.execute(
             'SELECT id, parent, transform, z, name FROM items')}
 
@@ -159,11 +229,16 @@ def read(path, on_progress=None):
 
         base_dir = os.path.dirname(path)
         out = []
+        images = {}   # image id -> bytes, read once per image
+        for image_id, data, source in db.execute(
+                'SELECT id, data, source FROM images'):
+            images[image_id] = (bytes(data) if data is not None else None,
+                                source)
         rows = db.execute(
-            'SELECT ii.id, ii.image_transform, ii.image_bounds, '
-            'img.data, img.source FROM items_images ii '
-            'JOIN images img ON img.id = ii.image').fetchall()
-        for i, (iid, img_tf, bounds, data, source) in enumerate(rows):
+            'SELECT id, image_transform, image_bounds, image '
+            'FROM items_images').fetchall()
+        for i, (iid, img_tf, bounds, image_id) in enumerate(rows):
+            data, source = images.get(image_id, (None, None))
             if data is None and source:
                 # Linked image: try its stored path, then next to the board
                 for candidate in (source, os.path.join(
@@ -171,6 +246,7 @@ def read(path, on_progress=None):
                     if os.path.isfile(candidate):
                         with open(candidate, 'rb') as f:
                             data = f.read()
+                        images[image_id] = (data, source)
                         break
             if data is None:
                 continue
@@ -180,7 +256,7 @@ def read(path, on_progress=None):
             crop = (l - itf[2, 0], t - itf[2, 1], r - l, b - t)
             out.append({
                 'type': 'image',
-                'data': bytes(data),
+                'data': data,
                 'crop': crop,
                 'transform': itf @ scene_matrix(iid),
                 'name': items[iid][4] or '',
@@ -202,5 +278,3 @@ def read(path, on_progress=None):
         return out
     except sqlite3.Error as e:
         raise PureRefError(f'Could not read the board: {e}') from e
-    finally:
-        db.close()

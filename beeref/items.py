@@ -28,6 +28,7 @@ from PyQt6.QtCore import Qt
 from beeref import commands
 from beeref.config import BeeSettings
 from beeref.constants import COLORS
+from beeref.rboard import imagestore
 from beeref.selection import SelectableMixin
 
 
@@ -105,6 +106,18 @@ class BeeItemMixin(SelectableMixin):
             self.do_flip()
 
 
+_settings = None
+
+
+def _shared_settings():
+    """R Board: one BeeSettings for all image items (making one per item
+    cost a settings-file check each on big imports)."""
+    global _settings
+    if _settings is None:
+        _settings = BeeSettings()
+    return _settings
+
+
 @register_item
 class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
     """Class for images added by the user."""
@@ -113,15 +126,20 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
     CROP_HANDLE_SIZE = 15
 
     def __init__(self, image, filename=None, **kwargs):
-        super().__init__(QtGui.QPixmap.fromImage(image))
+        # R Board: the pixels live in an imagestore.Source (shared by
+        # items showing the same image), held at about the resolution
+        # they're shown at; the item itself has no QPixmap
+        super().__init__()
         self.save_id = None
         self.filename = filename
-        self.reset_crop()
+        self.source = None
+        self.set_source(image if isinstance(image, imagestore.Source)
+                        else imagestore.Source.from_image(image))
         logger.debug(f'Initialized {self}')
         self.is_image = True
         self.crop_mode = False
         self.init_selectable()
-        self.settings = BeeSettings()
+        self.settings = _shared_settings()
         self.grayscale = False
         # R Board metadata saved with the item: source_url, arena_key,
         # arena_channel, ocr_text, analysis (cached color statistics)
@@ -143,8 +161,8 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         return item
 
     def __str__(self):
-        size = self.pixmap().size()
-        return (f'Image "{self.filename}" {size.width()} x {size.height()}')
+        return (f'Image "{self.filename}" '
+                f'{self.source.width} x {self.source.height}')
 
     @property
     def crop(self):
@@ -163,65 +181,31 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
 
     @grayscale.setter
     def grayscale(self, value):
-        logger.debug('Setting grayscale for {self} to {value}')
+        # Transparent parts are filled with the canvas colour, since a
+        # grayscale image format has no alpha (see Source.gray_level)
+        logger.debug(f'Setting grayscale for {self} to {value}')
         self._grayscale = value
-        if value is True:
-            # Using the grayscale image format to convert to grayscale
-            # loses an image's tranparency. So the straightworward
-            # following method gives us an ugly black replacement:
-            # img = img.convertToFormat(QtGui.QImage.Format.Format_Grayscale8)
-
-            # Instead, we will fill the background with the current
-            # canvas colour, so the issue is only visible if the image
-            # overlaps other images. The way we do it here only works
-            # as long as the canvas colour is itself grayscale,
-            # though.
-            # R Board: paint in RGB, then convert. Painting straight onto
-            # a Grayscale8 image intermittently crashed Qt's raster engine.
-            img = QtGui.QImage(
-                self.pixmap().size(), QtGui.QImage.Format.Format_RGB32)
-            img.fill(QtGui.QColor(*COLORS['Scene:Canvas']))
-            painter = QtGui.QPainter(img)
-            painter.drawPixmap(0, 0, self.pixmap())
-            painter.end()
-            img = img.convertToFormat(QtGui.QImage.Format.Format_Grayscale8)
-            self._grayscale_pixmap = QtGui.QPixmap.fromImage(img)
-
-            # Alternative methods that have their own issues:
-            #
-            # 1. Use setAlphaChannel of the resulting grayscale
-            # image. How do we get the original alpha channel? Using
-            # the whole original image also takes color values into
-            # account, not just their alpha values.
-            #
-            # 2. QtWidgets.QGraphicsColorizeEffect() with black colour
-            # on the GraphicsItem. This applys to everything the paint
-            # method does, so the selection outline/handles will also
-            # be gray. setGraphicsEffect is only available on some
-            # widgets, so we can't apply it selectively.
-            #
-            # 3. Going through every pixel and doing it manually — bad
-            # performance.
-        else:
-            self._grayscale_pixmap = None
-
         self.update()
+
+    def _gray(self, width, img):
+        return self.source.gray_level(
+            width, img, QtGui.QColor(*COLORS['Scene:Canvas']))
 
     def sample_color_at(self, pos):
         ipos = self.mapFromScene(pos)
+        width, img = self.source.best_loaded(self.source.width)
         if self.grayscale:
-            pm = self._grayscale_pixmap
-        else:
-            pm = self.pixmap()
-        img = pm.toImage()
-
-        color = img.pixelColor(int(ipos.x()), int(ipos.y()))
+            img = self._gray(width, img)
+        ratio = self.source.ratio(width)
+        x = min(int(ipos.x() * ratio), img.width() - 1)
+        y = min(int(ipos.y() * ratio), img.height() - 1)
+        color = img.pixelColor(max(x, 0), max(y, 0))
         if color.alpha():
             return color
 
     def bounding_rect_unselected(self):
         if self.crop_mode:
-            return QtWidgets.QGraphicsPixmapItem.boundingRect(self)
+            return self.full_rect()
         else:
             return self.crop
 
@@ -243,7 +227,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         key = (self.crop.getRect(), bool(self.grayscale))
         if self._study_cache is None or self._study_cache[0] != key:
             from beeref.rboard import colorstudy
-            img = self.pixmap().copy(self.crop.toRect()).toImage()
+            img = self.visible_image()
             self._study_cache = (key, colorstudy.study(img, self.grayscale))
         return self._study_cache[1]
 
@@ -274,38 +258,78 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         return formt
 
     def pixmap_to_bytes(self, apply_grayscale=False, apply_crop=False):
-        """Convert the pixmap data to PNG bytestring."""
+        """The image as file data: the original file's data, unchanged,
+        unless grayscale or crop are applied (then it's encoded)."""
+        wants_gray = apply_grayscale and self.grayscale
+        if not wants_gray and not apply_crop:
+            data, fmt = self.source.file_data()
+            if data is not None:
+                return (data, fmt)
+        img = self.source.full_image()
+        if wants_gray:
+            img = self._gray(self.source.width, img)
+        if apply_crop:
+            img = img.copy(self.crop.toRect())
         barray = QtCore.QByteArray()
         buffer = QtCore.QBuffer(barray)
         buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
-        if apply_grayscale and self.grayscale:
-            pm = self._grayscale_pixmap
-        else:
-            pm = self.pixmap()
-
-        if apply_crop:
-            pm = pm.copy(self.crop.toRect())
-
-        img = pm.toImage()
         imgformat = self.get_imgformat(img)
         img.save(buffer, imgformat.upper(), quality=90)
         return (barray.data(), imgformat)
 
-    def setPixmap(self, pixmap):
-        super().setPixmap(pixmap)
+    def set_source(self, source):
+        """Show an imagestore.Source (shared, never copied)."""
+        import weakref
+        self.prepareGeometryChange()
+        self.source = source
+        source.items = [r for r in source.items if r() is not None]
+        source.items.append(weakref.ref(self))
         self._study_cache = None
         self.study_mode = None  # R Board colour study: 'value'/'color'
         self.reset_crop()
 
+    def is_null(self):
+        return self.source.is_null()
+
+    def full_rect(self):
+        return QtCore.QRectF(0, 0, self.source.width, self.source.height)
+
+    def pixmap(self):
+        """The full-resolution image (decoded now if needed). R Board
+        code draws and analyses smaller copies; this is for BeeRef code
+        that needs every pixel."""
+        return QtGui.QPixmap.fromImage(self.source.full_image())
+
+    def setPixmap(self, pixmap):
+        self.set_source(imagestore.Source.from_image(pixmap.toImage()))
+
     def pixmap_from_bytes(self, data):
-        """Set image pimap from a bytestring."""
-        pixmap = QtGui.QPixmap()
-        pixmap.loadFromData(data)
-        self.setPixmap(pixmap)
+        """Set the image from file data."""
+        self.set_source(imagestore.Source.from_bytes(data))
+
+    def visible_image(self, min_side=0):
+        """The visible (cropped) part as a QImage, from the base copy, or
+        a sharper one if its short side would be under `min_side`."""
+        source = self.source
+        width = source.base_width
+        short = min(self.crop.width(), self.crop.height())
+        if min_side and short * source.ratio(width) < min_side:
+            width = min(source.width,
+                        round(source.width * min_side / max(short, 1)))
+            img = source.image_at_least(width)
+        else:
+            img = source.level(width)
+            if img is None:
+                img = source.image_at_least(width)
+        ratio = img.width() / source.width if source.width else 1
+        r = self.crop
+        return img.copy(QtCore.QRect(
+            round(r.x() * ratio), round(r.y() * ratio),
+            max(1, round(r.width() * ratio)),
+            max(1, round(r.height() * ratio))))
 
     def create_copy(self):
-        item = BeePixmapItem(QtGui.QImage(), self.filename)
-        item.setPixmap(self.pixmap())
+        item = BeePixmapItem(self.source, self.filename)
         item.setPos(self.pos())
         item.setZValue(self.zValue())
         item.setScale(self.scale())
@@ -325,7 +349,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
     def color_gamut(self):
         logger.debug(f'Calculating color gamut for {self}')
         gamut = defaultdict(int)
-        img = self.pixmap().toImage()
+        img = self.source.level(self.source.base_width)
         # Don't evaluate every pixel for larger images:
         step = max(1, int(max(img.width(), img.height()) / 1000))
         logger.debug(f'Considering every {step}. row/column')
@@ -357,11 +381,10 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         return gamut
 
     def copy_to_clipboard(self, clipboard):
-        clipboard.setPixmap(self.pixmap())
+        clipboard.setImage(self.source.full_image())
 
     def reset_crop(self):
-        self.crop = QtCore.QRectF(
-            0, 0, self.pixmap().size().width(), self.pixmap().size().height())
+        self.crop = self.full_rect()
 
     @property
     def crop_handle_size(self):
@@ -486,8 +509,9 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             self.paint_debug(painter, option, widget)
 
             # Darken image outside of cropped area
-            painter.drawPixmap(0, 0, self.pixmap())
-            path = QtWidgets.QGraphicsPixmapItem.shape(self)
+            self.draw_image(painter, self.full_rect())
+            path = QtGui.QPainterPath()
+            path.addRect(self.full_rect())
             path.addRect(self.crop_temp)
             color = QtGui.QColor(0, 0, 0)
             color.setAlpha(100)
@@ -509,9 +533,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
                 painter.drawImage(self.crop, overlay)
                 painter.restore()
             else:
-                pm = (self._grayscale_pixmap if self.grayscale
-                      else self.pixmap())
-                painter.drawPixmap(self.crop, pm, self.crop)
+                self.draw_image(painter, self.crop)
             marks = self.meta.get('marks')
             if marks:
                 from beeref.rboard.pen import paint_marks
@@ -521,6 +543,32 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
                 paint_marks(painter, marks)
                 painter.restore()
             self.paint_selectable(painter, option, widget)
+
+    def draw_image(self, painter, rect):
+        """Draw the part `rect` (image coordinates) from the copy that
+        suits the current zoom, asking for a sharper one if needed."""
+        source = self.source
+        if source.is_null():
+            return
+        t = painter.combinedTransform()
+        scale = (t.m11() ** 2 + t.m12() ** 2) ** 0.5
+        wanted = source.wanted_width(scale)
+        if imagestore._exact:
+            width, img = wanted, source.level(wanted)
+            if img is None:
+                img = source.image_at_least(wanted)
+        else:
+            width, img = source.best_loaded(wanted)
+            if width < wanted:
+                imagestore.store().request(source, wanted)
+            imagestore.store().touch(source, width)
+        if self.grayscale:
+            img = self._gray(width, img)
+        rx = img.width() / source.width
+        ry = img.height() / source.height
+        painter.drawImage(rect, img, QtCore.QRectF(
+            rect.x() * rx, rect.y() * ry, rect.width() * rx,
+            rect.height() * ry))
 
     def enter_crop_mode(self):
         logger.debug(f'Entering crop mode on {self}')
@@ -599,31 +647,31 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         if handle == self.crop_handle_bottomleft:
             topleft = QtCore.QPointF(0, self.crop_temp.top())
             bottomright = QtCore.QPointF(
-                self.crop_temp.right(), self.pixmap().size().height())
+                self.crop_temp.right(), self.source.height)
         if handle == self.crop_handle_bottomright:
             topleft = self.crop_temp.topLeft()
             bottomright = QtCore.QPointF(
-                self.pixmap().size().width(), self.pixmap().size().height())
+                self.source.width, self.source.height)
         if handle == self.crop_handle_topright:
             topleft = QtCore.QPointF(self.crop_temp.left(), 0)
             bottomright = QtCore.QPointF(
-                self.pixmap().size().width(), self.crop_temp.bottom())
+                self.source.width, self.crop_temp.bottom())
         if handle == self.crop_edge_top:
             topleft = QtCore.QPointF(0, 0)
             bottomright = QtCore.QPointF(
-                self.pixmap().size().width(), self.crop_temp.bottom())
+                self.source.width, self.crop_temp.bottom())
         if handle == self.crop_edge_bottom:
             topleft = QtCore.QPointF(0, self.crop_temp.top())
             bottomright = QtCore.QPointF(
-                self.pixmap().size().width(), self.pixmap().size().height())
+                self.source.width, self.source.height)
         if handle == self.crop_edge_left:
             topleft = QtCore.QPointF(0, 0)
             bottomright = QtCore.QPointF(
-                self.crop_temp.right(), self.pixmap().size().height())
+                self.crop_temp.right(), self.source.height)
         if handle == self.crop_edge_right:
             topleft = QtCore.QPointF(self.crop_temp.left(), 0)
             bottomright = QtCore.QPointF(
-                self.pixmap().size().width(), self.pixmap().size().height())
+                self.source.width, self.source.height)
 
         point.setX(min(bottomright.x(), max(topleft.x(), point.x())))
         point.setY(min(bottomright.y(), max(topleft.y(), point.y())))
@@ -688,6 +736,10 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
 
     def __init__(self, text=None, **kwargs):
         super().__init__(text or "Text")
+        # R Board: laying text out is slow; draw it from a cached image
+        # (re-rendered when the zoom or the text changes)
+        self.setCacheMode(
+            QtWidgets.QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.save_id = None
         logger.debug(f'Initialized {self}')
         self.is_image = False

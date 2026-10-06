@@ -39,6 +39,11 @@ def logfile_name():
         os.path.dirname(BeeSettings().fileName()), f'{constants.APPNAME}.log')
 
 
+# R Board: the log file and loggers follow --loglevel (INFO by default).
+# Logging every debug line to the file cost about a second of disk
+# checks per few thousand images on import.
+_level = CommandlineArgs().loglevel
+
 logging_conf = {
     'version': 1,
     'formatters': {
@@ -63,25 +68,25 @@ logging_conf = {
             'filename': logfile_name(),
             'maxBytes': 1024 * 1000,  # 1MB
             'backupCount': 1,
-            'level': 'DEBUG',
+            'level': _level,
             'delay': True,
         }
     },
     'loggers': {
         'beeref': {
             'handlers': ['console', 'file'],
-            'level': 'TRACE',
+            'level': _level,
             'propagate': False,
         },
         'Qt': {
             'handlers': ['console', 'file'],
-            'level': 'DEBUG',
+            'level': _level,
             'propagate': False,
         },
     },
     'root': {
         'handlers': ['console', 'file'],
-        'level': 'DEBUG',
+        'level': _level,
     },
 }
 

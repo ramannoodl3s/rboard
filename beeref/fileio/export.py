@@ -150,10 +150,12 @@ class SceneToPixmapExporter(SceneExporterBase):
                 if id(item) not in keep and item.isVisible():
                     item.setVisible(False)
                     hidden.append(item)
+        from beeref.rboard import imagestore
         try:
-            self.scene.render(painter,
-                              source=self.source_rect(),
-                              target=target_rect)
+            with imagestore.exact():
+                self.scene.render(painter,
+                                  source=self.source_rect(),
+                                  target=target_rect)
         finally:
             for item in hidden:
                 item.setVisible(True)

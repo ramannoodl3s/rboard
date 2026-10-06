@@ -81,6 +81,36 @@ def exif_rotated_image(path=None):
     return img
 
 
+def load_image_data(path):
+    """R Board: the file data of a local path or URL, unchanged (decoding,
+    EXIF orientation included, is imagestore's job). Returns (bytes or
+    None, filename)."""
+    if not isinstance(path, str) and path.isLocalFile():
+        path = path.toLocalFile()
+    if isinstance(path, str):
+        path = os.path.normpath(path)
+        try:
+            with open(path, 'rb') as f:
+                return f.read(), path
+        except OSError as e:
+            logger.debug(f'Reading image failed: {e}')
+            return None, path
+    url = bytes(path.toEncoded()).decode()
+    domain = '.'.join(parse.urlparse(url).netloc.split(".")[-2:])
+    if domain == 'pinterest.com':
+        try:
+            page_data = request.urlopen(url).read()
+            root = etree.HTML(page_data)
+            url = root.xpath("//img")[0].get('src')
+        except Exception as e:
+            logger.debug(f'Pinterest image download failed: {e}')
+    try:
+        return request.urlopen(url).read(), url
+    except (URLError, ValueError) as e:
+        logger.debug(f'Downloading image failed: {e}')
+        return None, url
+
+
 def load_image(path):
     if isinstance(path, str):
         path = os.path.normpath(path)

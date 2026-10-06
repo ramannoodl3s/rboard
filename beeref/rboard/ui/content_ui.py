@@ -159,8 +159,8 @@ class ContentMixin:
                 try:
                     if item.scene() is not self.scene:
                         continue
-                    img = semantic.model_input_image(item.pixmap(),
-                                                     item.crop)
+                    img = semantic.model_input_image(
+                        item.visible_image(semantic.SIZE))
                 except RuntimeError:
                     continue  # deleted meanwhile
                 if img is not None:

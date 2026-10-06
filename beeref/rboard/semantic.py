@@ -270,10 +270,10 @@ def normalize(x):
 
 # ---------- images ----------
 
-def model_input_image(pixmap, crop):
-    """The visible part of an image, resized so the short side is 224 px
-    and centre-cropped to 224 x 224. GUI thread (pixmaps)."""
-    pm = pixmap.copy(crop.toRect())
+def model_input_image(image):
+    """The visible part of an image (BeePixmapItem.visible_image),
+    resized so the short side is 224 px and centre-cropped to 224 x 224."""
+    pm = image
     if pm.isNull() or pm.width() < 1 or pm.height() < 1:
         return None
     scale = SIZE / min(pm.width(), pm.height())
@@ -283,7 +283,7 @@ def model_input_image(pixmap, crop):
         pm = pm.scaled(2 * w, 2 * h, Qt.AspectRatioMode.IgnoreAspectRatio,
                        Qt.TransformationMode.FastTransformation)
     img = pm.scaled(w, h, Qt.AspectRatioMode.IgnoreAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation).toImage()
+                    Qt.TransformationMode.SmoothTransformation)
     return img.copy((w - SIZE) // 2, (h - SIZE) // 2, SIZE, SIZE)
 
 

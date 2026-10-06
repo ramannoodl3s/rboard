@@ -16,7 +16,8 @@ from PyQt6.QtCore import Qt
 
 from beeref import commands, fileio, widgets
 from beeref.items import BeePixmapItem, BeeTextItem
-from beeref.rboard import analysis, attributes, layouts, ocr, pureref, sidecar
+from beeref.rboard import (
+    analysis, attributes, imagestore, layouts, ocr, pureref, sidecar)
 from beeref.rboard.palette_item import BeePaletteItem
 from beeref.rboard.widgets import (
     FindColorDialog, SearchBar)
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 DUPLICATE_DISTANCE = 5    # max differing bits of the 64-bit image hash
 DUPLICATE_COLOR_DISTANCE = 8  # max delta E between average colors
 OCR_MAX_SIDE = 4000       # larger images are downscaled before OCR
+OCR_MIN_SIDE = 1200       # ...and smaller copies are swapped for sharper
 
 
 def _qrect(rect):
@@ -78,15 +80,18 @@ def _run_pureref(filename, worker):
         logger.exception('PureRef import failed')
         worker.finished.emit(filename, [f'Could not read the board: {e}'])
         return
-    worker.begin_processing.emit(len(entries))
-    for i, entry in enumerate(entries):
-        if entry['type'] == 'image':
-            img = QtGui.QImage.fromData(entry['data'])
-            entry['image'] = None if img.isNull() else img
-            del entry['data']
-        worker.progress.emit(i)
-        if worker.canceled:
-            break
+    # Decode every distinct image once, in parallel, at the resolution
+    # imagestore keeps; items showing the same image share it
+    images = [e for e in entries if e['type'] == 'image']
+    worker.begin_processing.emit(len(images))
+    sources = imagestore.decode_many(
+        [e['data'] for e in images],
+        on_progress=lambda done, total: worker.progress.emit(
+            round(done * len(images) / max(total, 1)) - 1),
+        is_canceled=lambda: worker.canceled)
+    for entry, source in zip(images, sources):
+        entry['image'] = source
+        del entry['data']
     worker.pureref_entries = entries
     worker.finished.emit(filename, [])
 
@@ -173,7 +178,7 @@ class RBoardMixin:
                 QtWidgets.QApplication.processEvents()
                 if progress.wasCanceled():
                     return None
-            thumb = analysis.thumbnail_for(item.pixmap(), item.crop)
+            thumb = analysis.thumbnail_for(item.visible_image())
             stats = analysis.analyze(thumb, grayscale=item.grayscale)
             stats['key'] = key(item)
             item.meta['analysis'] = stats
@@ -393,7 +398,8 @@ class RBoardMixin:
             item = items[i]
             if item.scene() is not self.scene:
                 return  # removed from the board meanwhile
-            img = item.pixmap().copy(item.crop.toRect()).toImage()
+            # Text needs detail: a sharper copy if the base is small
+            img = item.visible_image(OCR_MIN_SIDE)
             if max(img.width(), img.height()) > OCR_MAX_SIDE:
                 img = img.scaled(OCR_MAX_SIDE, OCR_MAX_SIDE,
                                  Qt.AspectRatioMode.KeepAspectRatio,

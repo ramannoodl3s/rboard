@@ -47,6 +47,10 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.max_z = 0
         self.min_z = 0
         self.Z_STEP = 0.001
+        # R Board: the user items that are selected, kept between
+        # selection changes (every selected item asks while it's drawn)
+        self._user_selection = None
+        self.selectionChanged.connect(self._forget_selection)
         self.selectionChanged.connect(self.on_selection_change)
         self.changed.connect(self.on_change)
         self.items_to_add = Queue()
@@ -58,6 +62,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
 
     def clear(self):
         self._clear_ongoing = True
+        self._user_selection = None
         super().clear()
         self.internal_clipboard = []
         self.rubberband_item = RubberbandItem()
@@ -66,10 +71,12 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
 
     def addItem(self, item):
         logger.debug(f'Adding item {item}')
+        self._user_selection = None
         super().addItem(item)
 
     def removeItem(self, item):
         logger.debug(f'Removing item {item}')
+        self._user_selection = None
         super().removeItem(item)
 
     def cancel_active_modes(self):
@@ -444,10 +451,15 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         User items are items that have a ``save_id`` attribute.
         """
 
-        items = super().selectedItems()
-        if user_only:
-            return list(filter(lambda i: hasattr(i, 'save_id'), items))
-        return items
+        if not user_only:
+            return super().selectedItems()
+        if self._user_selection is None:
+            self._user_selection = [i for i in super().selectedItems()
+                                    if hasattr(i, 'save_id')]
+        return list(self._user_selection)
+
+    def _forget_selection(self):
+        self._user_selection = None
 
     def items_by_type(self, itype):
         """Returns all items of the given type."""

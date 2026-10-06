@@ -510,6 +510,11 @@ class SettingsDialog(QtWidgets.QDialog):
                  ('in a row', 'horizontal'), ('in a column', 'vertical'),
                  ('in a square', 'square')])),
             section_label('memory'),
+            FieldRow('image quality', self.quality_combo(s),
+                     'images are held at about the size they show on '
+                     'screen and sharpen as you zoom in. big images are '
+                     'shrunk harder. full resolution keeps every pixel '
+                     'in memory'),
             FieldRow('largest image', setting_spin(
                 s, 'Items/image_allocation_limit', 0, 10000, ' MB'),
                 'images bigger than this are refused; 0 means no limit'),
@@ -544,6 +549,17 @@ class SettingsDialog(QtWidgets.QDialog):
         close.clicked.connect(self.accept)
         outer.addLayout(button_row(reset, None, close))
         self.show()
+
+    def quality_combo(self, settings):
+        from beeref.rboard import imagestore
+        combo = setting_combo(settings, 'Items/image_quality', [
+            ('performance (least memory)', 'performance'),
+            ('balanced', 'balanced'),
+            ('quality', 'quality'),
+            ('full resolution (most memory)', 'full')])
+        # Sharpening rules apply at once; base copies on the next open
+        combo.currentIndexChanged.connect(imagestore.reload_preset)
+        return combo
 
     def scrolled(self, widget):
         area = QtWidgets.QScrollArea()

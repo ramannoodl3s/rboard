@@ -26,6 +26,7 @@ dependencies = [
     "rectangle-packer>=2.0.1,<=2.0.2",
     # R Board
     "numpy>=1.26",
+    "pillow>=10.0",
     "winrt-runtime; sys_platform == 'win32'",
     "winrt-Windows.Foundation; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections; sys_platform == 'win32'",

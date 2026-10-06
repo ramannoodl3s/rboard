@@ -46,8 +46,7 @@ _ids = itertools.count(1)
 
 def linked_copy(source):
     """A lightweight copy of a main-board image for a sub board."""
-    item = BeePixmapItem(QtGui.QImage(), source.filename)
-    item.setPixmap(source.pixmap())   # shared pixel data, no copy
+    item = BeePixmapItem(source.source, source.filename)  # shared pixels
     item.crop = source.crop
     item.setOpacity(source.opacity())
     if source.grayscale:

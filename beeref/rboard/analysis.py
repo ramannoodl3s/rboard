@@ -106,9 +106,10 @@ def kmeans(points, k, iterations=12, seed=0):
 
 # ---------- per-image analysis ----------
 
-def thumbnail_for(pixmap, crop):
-    """Downscale the visible (cropped) part of a pixmap. GUI thread only."""
-    pm = pixmap.copy(crop.toRect())
+def thumbnail_for(image):
+    """Downscale the visible part of an image (see
+    BeePixmapItem.visible_image)."""
+    pm = image
     if max(pm.width(), pm.height()) > 4 * THUMB_SIZE:
         pm = pm.scaled(4 * THUMB_SIZE, 4 * THUMB_SIZE,
                        Qt.AspectRatioMode.KeepAspectRatio,
@@ -116,7 +117,7 @@ def thumbnail_for(pixmap, crop):
     pm = pm.scaled(THUMB_SIZE, THUMB_SIZE,
                    Qt.AspectRatioMode.KeepAspectRatio,
                    Qt.TransformationMode.SmoothTransformation)
-    return pm.toImage()
+    return pm
 
 
 def _dhash(img):

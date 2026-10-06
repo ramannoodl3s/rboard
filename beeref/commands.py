@@ -37,10 +37,16 @@ class InsertItems(QtGui.QUndoCommand):
             for item in self.items:
                 self.old_positions.append(item.pos())
                 item.setPos(item.pos() + self.position - rect.center())
-        for item in self.items:
-            self.scene.addItem(item)
-            item.setSelected(True)
-            item.bring_to_front()
+        # R Board: announce the new selection once, not once per item
+        blocked = self.scene.blockSignals(True)
+        try:
+            for item in self.items:
+                self.scene.addItem(item)
+                item.setSelected(True)
+                item.bring_to_front()
+        finally:
+            self.scene.blockSignals(blocked)
+        self.scene.selectionChanged.emit()
 
     def undo(self):
         self.scene.deselect_all_items()

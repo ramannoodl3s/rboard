@@ -19,10 +19,10 @@ from PyQt6 import QtCore
 
 from beeref import commands
 from beeref.fileio.errors import BeeFileIOError
-from beeref.fileio.image import load_image
+from beeref.fileio.image import load_image_data
 from beeref.fileio.sql import SQLiteIO, is_bee_file, is_rboard_file
 from beeref.items import BeePixmapItem
-from beeref.rboard import sidecar
+from beeref.rboard import imagestore, sidecar
 
 
 __all__ = [
@@ -60,22 +60,31 @@ def load_images(filenames, pos, scene, worker):
     errors = []
     items = []
     worker.begin_processing.emit(len(filenames))
-    for i, filename in enumerate(filenames):
+    # R Board: read every file, then decode them in parallel, each at
+    # the resolution imagestore keeps
+    datas, names = [], []
+    for filename in filenames:
         logger.info(f'Loading image from file {filename}')
-        img, filename = load_image(filename)
-        worker.progress.emit(i)
-        if img.isNull():
+        data, name = load_image_data(filename)
+        datas.append(data)
+        names.append(name)
+        if worker.canceled:
+            break
+    sources = imagestore.decode_many(
+        datas, on_progress=lambda done, total: worker.progress.emit(
+            round(done * len(names) / max(total, 1)) - 1),
+        is_canceled=lambda: worker.canceled)
+
+    for source, filename in zip(sources, names):
+        if source is None:
             logger.info(f'Could not load file {filename}')
             errors.append(filename)
             continue
-
-        item = BeePixmapItem(img, filename)
+        item = BeePixmapItem(source, filename)
         sidecar.apply(item, filename)  # R Board: source links (links.txt)
         item.set_pos_center(pos)
         scene.add_item_later({'item': item, 'type': 'pixmap'}, selected=True)
         items.append(item)
-        if worker.canceled:
-            break
 
     scene.undo_stack.push(
         commands.InsertItems(scene, items, ignore_first_redo=True))

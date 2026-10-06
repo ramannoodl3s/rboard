@@ -216,6 +216,20 @@ class SQLiteIO:
         if self.worker:
             self.worker.begin_processing.emit(len(rows))
 
+        # R Board: decode all images in parallel (identical ones once),
+        # each at the resolution imagestore keeps
+        from beeref.rboard import imagestore
+        sources = imagestore.decode_many(
+            [row[9] if row[1] == 'pixmap' else None for row in rows],
+            on_progress=(lambda done, total: self.worker.progress.emit(
+                round(done * len(rows) / max(total, 1)) - 1))
+            if self.worker else None,
+            is_canceled=(lambda: self.worker.canceled) if self.worker
+            else (lambda: False))
+        if self.worker and self.worker.canceled:
+            self.worker.finished.emit('', [])
+            return
+
         for i, row in enumerate(rows):
             data = {
                 'save_id': row[0],
@@ -230,9 +244,8 @@ class SQLiteIO:
             }
 
             if data['type'] == 'pixmap':
-                item = BeePixmapItem(QtGui.QImage())
-                item.pixmap_from_bytes(row[9])
-                if item.pixmap().isNull():
+                item = BeePixmapItem(sources[i] or QtGui.QImage())
+                if item.is_null():
                     item = data['data']['text'] = (
                         f'Image could not be loaded: {item.filename}\n'
                         + IMG_LOADING_ERROR_MSG)
@@ -241,12 +254,6 @@ class SQLiteIO:
 
             self.scene.add_item_later(data)
 
-            if self.worker:
-                logger.trace(f'Emit progress: {i}')
-                self.worker.progress.emit(i)
-                if self.worker.canceled:
-                    self.worker.finished.emit('', [])
-                    return
         if self.worker:
             self.worker.finished.emit(self.filename, [])
 
@@ -314,8 +321,12 @@ class SQLiteIO:
                 if self.worker.canceled:
                     break
         self.delete_items(to_delete)
-        self.ex('VACUUM')
+        # R Board: one commit for the whole save (not one per item), and
+        # only compact the file when something was removed from it
         self.connection.commit()
+        if to_delete:
+            self.ex('VACUUM')
+            self.connection.commit()
         if self.worker:
             self.worker.finished.emit(self.filename, [])
 
@@ -323,7 +334,6 @@ class SQLiteIO:
         to_delete = [(pk,) for pk in to_delete]
         self.exmany('DELETE FROM items WHERE id=?', to_delete)
         self.exmany('DELETE FROM sqlar WHERE item_id=?', to_delete)
-        self.connection.commit()
 
     def insert_item(self, item):
         self.ex(
@@ -342,7 +352,6 @@ class SQLiteIO:
                 'INSERT INTO sqlar (item_id, name, mode, sz, data) '
                 'VALUES (?, ?, ?, ?, ?)',
                 (item.save_id, name, 0o644, len(pixmap), pixmap))
-        self.connection.commit()
 
     def update_item(self, item):
         """Update item data.
@@ -358,4 +367,3 @@ class SQLiteIO:
              item.rotation(), item.flip(),
              json.dumps(item.get_extra_save_data()),
              item.save_id))
-        self.connection.commit()
