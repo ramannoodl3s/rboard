@@ -1,6 +1,0 @@
-# For developers
-
--r test.txt
--r build.txt
-
-flake8==7.0.0
