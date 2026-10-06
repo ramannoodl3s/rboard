@@ -17,16 +17,29 @@ python -m venv .venv
 .venv\Scripts\rboard.exe
 ```
 
-## Portable build
+## Portable build and releases
 
 ```
 .venv\Scripts\pip install -r requirements\build.txt
-.venv\Scripts\pyinstaller RBoard.spec --noconfirm
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Python .venv\Scripts\python.exe
 ```
 
-This makes `dist\R Board\` with `R Board.exe`; zip that folder to share
-it. Nothing needs installing on the other computer. The content model is
-downloaded on first use, as when running from source.
+This makes `dist\R-Board-<version>-portable.zip` (the `dist\R Board\`
+folder with `R Board.exe`, a short READ ME and the licence). Nothing needs
+installing on the other computer; the content model is downloaded on
+first use.
+
+To publish a release: set `VERSION` in `beeref/constants.py` (and in
+`pyproject.toml`), commit, then push a matching tag:
+
+```
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub then builds the zip on Windows (`.github/workflows/release.yml`)
+and publishes it on the releases page. The newest one is always at
+https://github.com/ramannoodl3s/rboard/releases/latest.
 
 ## Interface (Softclub)
 
