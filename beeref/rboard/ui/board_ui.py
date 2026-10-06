@@ -26,7 +26,9 @@ from beeref.rboard.ui.theme import px, tm, ui_font
 
 
 NOTE_WIDTH = 220
-ALL = {'all_if_none': True}  # bar arranges everything if nothing's selected
+# Bar arrange commands work on everything when nothing's selected
+ALL = {'all_if_none': True}
+SORT = {'all_if_none': True, 'icon': 'sort'}
 ATTRIBUTE_ICONS = {
     'shape': 'fit', 'channel': 'forward', 'board': 'image',
     'folder': 'folder', 'text': 'text', 'note': 'note', 'marks': 'pen',
@@ -362,9 +364,9 @@ class BoardUIMixin:
                 ('action', 'arrange_vertical', 'in a column', ALL),
                 ('action', 'arrange_square', 'in a square', ALL)]),
             ('sep',), ('label', 'colour'),
-            ('action', 'arrange_color_dominant', 'by dominant colour', ALL),
-            ('action', 'arrange_color_average', 'by average colour', ALL),
-            ('action', 'arrange_lightness', 'by lightness', ALL),
+            ('action', 'arrange_color_dominant', 'by dominant colour', SORT),
+            ('action', 'arrange_color_average', 'by average colour', SORT),
+            ('action', 'arrange_lightness', 'by lightness', SORT),
             ('sep',), ('label', 'size'),
             ('action', 'normalize_height', 'same height', ALL),
             ('action', 'normalize_width', 'same width', ALL),

@@ -1,14 +1,20 @@
 # R Board
 
-A moodboarding fork of [BeeRef](https://github.com/rbreu/beeref) (GPL-3.0).
-Everything BeeRef does still works; R Board adds the features below.
+A moodboard app for Windows: a fork of the reference image viewer
+[BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu, with colour
+sorting, palettes, text reading, Are.na and PureRef import, sub boards,
+notes, tags and a pen. Everything BeeRef does still works.
 New code lives in `beeref/rboard/`; changes to BeeRef's own files are small
 hooks (menus, item metadata, palette loading).
 
-## Run
+## Run from source
+
+Needs Python 3.11 on Windows 10 or 11.
 
 ```
-.venv\Scripts\rboard.exe            # or: .venv\Scripts\pythonw -m beeref
+python -m venv .venv
+.venv\Scripts\pip install -e .
+.venv\Scripts\rboard.exe
 ```
 
 ## Interface (Softclub)
@@ -81,3 +87,9 @@ QT_QPA_PLATFORM=offscreen .venv/Scripts/python -m pytest tests
 R Board's own tests are in `tests/rboard/`. Ten upstream tests fail
 headless on Windows (window-manager and permission tests); they fail the
 same way on unmodified BeeRef.
+
+## License
+
+R Board is free software under the GNU General Public License v3 (see
+`LICENSE`), as is BeeRef, which it is based on: Copyright © 2021-2024
+Rebecca Breu. If you share R Board, share its source code too.

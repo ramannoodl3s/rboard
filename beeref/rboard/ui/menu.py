@@ -211,12 +211,10 @@ class Card(QtWidgets.QFrame):
     """Rounded panel (shared by menus and bars). Its parent paints the
     shadow with paint_shadow()."""
 
-    def __init__(self, parent=None, radius='radius-md', fill='surface-raised',
-                 shadow='popover'):
+    def __init__(self, parent=None, radius='radius-md', fill='surface-raised'):
         super().__init__(parent)
         self.radius = radius
         self.fill = fill
-        self.shadow_kind = shadow
 
     def update_theme(self):
         self.update()
@@ -312,7 +310,7 @@ class OverlayMenu(QtWidgets.QWidget):
                 label += ' (all)'
             row = MenuRow(self, label, callback=callback, kbd=kbd,
                           checked=qa.isChecked() if qa.isCheckable() else None,
-                          enabled=enabled)
+                          enabled=enabled, icon=opts.get('icon'))
             self.rows.append(row)
             return row
         if kind == 'item':

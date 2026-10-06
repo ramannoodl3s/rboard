@@ -23,7 +23,6 @@ from beeref import constants, commands
 from beeref.config import logfile_name
 from beeref.widgets import (  # noqa: F401
     controls,
-    settings,
     welcome_overlay,
     color_gamut,
 )

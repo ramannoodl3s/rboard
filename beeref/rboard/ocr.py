@@ -30,10 +30,6 @@ def is_available():
             and OcrEngine.try_create_from_user_profile_languages() is not None)
 
 
-def max_dimension():
-    return OcrEngine.max_image_dimension if OcrEngine else 0
-
-
 async def _recognize(png_bytes):
     stream = InMemoryRandomAccessStream()
     writer = DataWriter(stream)

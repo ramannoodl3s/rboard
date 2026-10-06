@@ -107,7 +107,7 @@ class HomeBar(QtWidgets.QWidget):
         self.open_button = None
         self.menu = None
         self.pinned = 0  # >0 keeps the bar visible (e.g. while drawing)
-        self.card = Card(self, radius='radius-lg', shadow='float')
+        self.card = Card(self, radius='radius-lg')
         layout = QtWidgets.QHBoxLayout(self.card)
         layout.setContentsMargins(GAP, GAP, GAP, GAP)
         layout.setSpacing(GAP)

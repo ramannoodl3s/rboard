@@ -16,7 +16,7 @@
 APPNAME = 'R Board'
 APPNAME_FULL = f'{APPNAME} Moodboard (based on BeeRef)'
 VERSION = '0.1.0'
-WEBSITE = 'https://github.com/rbreu/beeref'
+WEBSITE = 'https://github.com/ramannoodl3s/rboard'
 COPYRIGHT = ('Based on BeeRef, Copyright © 2021-2024 Rebecca Breu. '
              'Licensed under the GNU GPL v3.')
 
