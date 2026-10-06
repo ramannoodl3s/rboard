@@ -196,15 +196,38 @@ def sort_key(hex_color, mode):
     return (0, int(hue // 15), -L)
 
 
-def palette(stats_list, count):
-    """The board's dominant colors as hex strings, most common first."""
-    pixels = np.concatenate([sample_pixels(s) for s in stats_list])
+PALETTE_VERSION = 1
+
+
+def _palette_from(pixels, count):
+    """[(hex, share)] from (N, 3) uint8 pixels, most prominent first."""
     if len(pixels) > 60000:
         pixels = pixels[np.random.default_rng(0).choice(
             len(pixels), 60000, replace=False)]
     centers, counts = kmeans(rgb_to_lab(pixels), count, iterations=20)
     order = np.argsort(-counts)
-    return [to_hex(lab_to_rgb(centers[i])) for i in order]
+    total = max(int(counts.sum()), 1)
+    return [(to_hex(lab_to_rgb(centers[i])), float(counts[i]) / total)
+            for i in order if counts[i]]
+
+
+def palette(stats_list, count):
+    """Several images' dominant colors as [(hex, share)], most common
+    first."""
+    return _palette_from(
+        np.concatenate([sample_pixels(s) for s in stats_list]), count)
+
+
+def image_palette(thumb, count, grayscale=False):
+    """One image's palette from its analysis thumbnail (QImage)."""
+    rgb, alpha = qimage_to_rgb(thumb)
+    pixels = rgb[alpha > 128]
+    if len(pixels) == 0:
+        pixels = rgb.reshape(-1, 3)
+    if grayscale:
+        g = np.round(pixels @ np.array([0.299, 0.587, 0.114]))
+        pixels = np.repeat(g[:, None], 3, 1).astype(np.uint8)
+    return _palette_from(pixels, count)
 
 
 def hamming(hash_a, hash_b):

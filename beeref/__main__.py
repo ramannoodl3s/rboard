@@ -111,8 +111,9 @@ def main():
     assert not args.debug_raise_error, args.debug_raise_error
 
     os.environ["QT_DEBUG_PLUGINS"] = "1"
+    from beeref.rboard.ui.theme import apply_interface_scale, tm
+    apply_interface_scale(settings)
     app = BeeRefApplication(sys.argv)
-    from beeref.rboard.ui.theme import tm
     tm().load()  # Softclub theme: palette, stylesheet, font
     bee = BeeRefMainWindow(app)  # NOQA:F841
 

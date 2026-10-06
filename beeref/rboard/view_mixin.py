@@ -16,7 +16,7 @@ from PyQt6.QtCore import Qt
 
 from beeref import commands, fileio, widgets
 from beeref.items import BeePixmapItem, BeeTextItem
-from beeref.rboard import analysis, arena, layouts, ocr, pureref
+from beeref.rboard import analysis, arena, attributes, layouts, ocr, pureref
 from beeref.rboard.palette_item import BeePaletteItem
 from beeref.rboard.widgets import (
     ArenaImportDialog, FindColorDialog, SearchBar)
@@ -155,6 +155,38 @@ class RBoardMixin:
             pass  # it already timed out
         self._rb_notification = widgets.BeeNotification(self, text)
 
+    # ---------- board file (.brd) ----------
+
+    def rb_board_data(self):
+        """Board-level data kept in .brd files."""
+        from beeref import constants
+        center = self.mapToScene(self.get_view_center())
+        return {
+            'format': {'app': constants.APPNAME,
+                       'version': constants.VERSION, 'brd': 1},
+            'view': {'scale': self.get_scale(),
+                     'center': [center.x(), center.y()]},
+            'tags': attributes.all_tags(self.rb_images()),
+        }
+
+    def rb_restore_view(self, data):
+        """Go back to where the board was viewed when it was saved.
+        Returns False when there's nothing to restore."""
+        view = (data or {}).get('view')
+        if not view or not self.scene.items():
+            return False
+        try:
+            scale = float(view['scale'])
+            x, y = (float(v) for v in view['center'])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if not 1e-4 < scale < 1e4:
+            return False
+        self.setTransform(QtGui.QTransform.fromScale(scale, scale))
+        self.recalc_scene_rect()
+        self.centerOn(QtCore.QPointF(x, y))
+        return True
+
     def rb_analyze(self, items):
         """Color statistics for image items, computed once and cached in
         the item's saved metadata."""
@@ -269,34 +301,36 @@ class RBoardMixin:
 
     # ---------- palette ----------
 
+    def rb_palette(self, images):
+        """[(hex, share)] for the images, most prominent first. An image's
+        own palette is worked out the first time it's viewed and kept with
+        the image (and saved in the board)."""
+        count = self.settings.valueOrDefault('Items/palette_size')
+        if len(images) == 1:
+            item = images[0]
+            key = [*_qrect(item.crop), bool(item.grayscale), count,
+                   analysis.PALETTE_VERSION]
+            cached = item.meta.get('palette')
+            if cached and cached.get('key') == key:
+                return [tuple(c) for c in cached['colors']]
+            thumb = analysis.thumbnail_for(item.pixmap(), item.crop)
+            colors = analysis.image_palette(thumb, count, item.grayscale)
+            item.meta['palette'] = {'key': key,
+                                    'colors': [list(c) for c in colors]}
+            return colors
+        stats = self.rb_analyze(images)
+        if stats is None:
+            return []
+        return analysis.palette(stats, count)
+
     def on_action_generate_palette(self):
+        """View the palette of the selection (or the board) in a menu."""
         self.cancel_active_modes()
         images = self.rb_selected(images_only=True, all_if_empty=True)
         if not images:
-            self.rb_notify('There are no images to take colors from')
+            self.rb_notify('there are no images to take colours from')
             return
-        count, ok = QtWidgets.QInputDialog.getInt(
-            self, 'Board Palette', 'Number of colors:',
-            self.settings.valueOrDefault('Items/palette_size'), 2, 24)
-        if not ok:
-            return
-        self.settings.setValue('Items/palette_size', count)
-        stats = self.rb_analyze(images)
-        if stats is None:
-            return
-        item = BeePaletteItem(analysis.palette(stats, count))
-        bbox = self.scene.itemsBoundingRect(items=images)
-        native = item.bounding_rect_unselected()
-        item.setScale(max(bbox.width() * 0.6, native.width() * 0.2)
-                      / native.width())
-        height = native.height() * item.scale()
-        gap = height * 0.25
-        center = QtCore.QPointF(
-            bbox.left() + native.width() * item.scale() / 2,
-            bbox.top() - gap - height / 2)
-        self.undo_stack.push(
-            commands.InsertItems(self.scene, [item], center))
-        self.rb_notify('Palette added. Ctrl+C copies its hex codes.')
+        self.rb_show_palette(images)
 
     # ---------- find by color / duplicates ----------
 
@@ -495,10 +529,12 @@ class RBoardMixin:
             return ' '.join(filter(None, (
                 meta.get('ocr_text'), item.filename,
                 meta.get('source_url'), meta.get('note'),
-                ' '.join(meta.get('tags', [])))))
+                ' '.join(meta.get('tags', [])),
+                attributes.search_words(item) if meta.get('analysis')
+                else '')))
         if isinstance(item, BeeTextItem):
             return item.toPlainText()
-        if isinstance(item, BeePaletteItem):
+        if isinstance(item, BeePaletteItem):  # from older boards
             return ' '.join(item.colors)
         return ''
 
@@ -518,6 +554,7 @@ class RBoardMixin:
         self.search_bar.refresh_meaning(self.rb_meaning_status())
 
     def rb_search(self, query):
+        self.rb_main().rb_refresh_profile()
         words = query.lower().split()
         self.scene.clearSelection()
         self.search_matches = []

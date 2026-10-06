@@ -54,7 +54,8 @@ class MenuRow(QtWidgets.QWidget):
 
     def __init__(self, menu, label, callback=None, kbd='', icon=None,
                  checked=None, enabled=True, danger=False, dot=None,
-                 count=None, submenu=None, trailing_icon=None, indent=0):
+                 count=None, submenu=None, trailing_icon=None, indent=0,
+                 hint='', on_remove=None, tooltip=''):
         super().__init__()
         self.menu = menu
         self.label = label
@@ -69,22 +70,33 @@ class MenuRow(QtWidgets.QWidget):
         self.submenu = submenu
         self.trailing_icon = trailing_icon
         self.indent = indent
+        self.hint = hint
+        self.on_remove = on_remove
         self.hovered = False
         self.setFixedHeight(ROW_H)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor if enabled
                        else Qt.CursorShape.ArrowCursor)
+        if tooltip:
+            self.setToolTip(tooltip)
+
+    def extra_text(self):
+        return ' · '.join(filter(None, (
+            self.hint, str(self.count) if self.count is not None else '',
+            self.kbd)))
 
     def preferred_width(self):
         fm = self.fontMetrics()
         width = 36 + 14 * self.indent + fm.horizontalAdvance(self.label) + 12
-        right = ' '.join(filter(None, (
-            str(self.count) if self.count is not None else '', self.kbd)))
+        right = self.extra_text()
         if right:
             width += 24 + fm.horizontalAdvance(right)
-        if self.submenu or self.trailing_icon:
+        if self.submenu or self.trailing_icon or self.on_remove:
             width += 22
         return width
+
+    def remove_rect(self):
+        return QtCore.QRectF(self.width() - 30, 0, 18, self.height())
 
     def enterEvent(self, event):
         self.hovered = True
@@ -98,6 +110,12 @@ class MenuRow(QtWidgets.QWidget):
     def mouseReleaseEvent(self, event):
         if (event.button() == Qt.MouseButton.LeftButton and self.enabled
                 and self.rect().contains(event.position().toPoint())):
+            if self.on_remove and self.remove_rect().contains(
+                    event.position()):
+                remove = self.on_remove
+                self.menu.close_all_menus()
+                QtCore.QTimer.singleShot(0, remove)
+                return
             if self.submenu:
                 self.menu.open_submenu(self)
                 return
@@ -134,12 +152,17 @@ class MenuRow(QtWidgets.QWidget):
         p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, self.label)
 
         right = rect.right() - 10
-        if self.submenu or self.trailing_icon:
+        if self.on_remove and self.hovered:
+            icons.draw(p, 'close', muted.name(), QtCore.QRectF(
+                right - 16, 0, 16, self.height()))
+            right -= 22
+        elif self.submenu or self.trailing_icon:
             icons.draw(p, self.trailing_icon or 'chevron-right', muted.name(),
                        QtCore.QRectF(right - 16, 0, 16, self.height()))
             right -= 22
-        extra = ' · '.join(filter(None, (
-            str(self.count) if self.count is not None else '', self.kbd)))
+        elif self.on_remove:
+            right -= 22
+        extra = self.extra_text()
         if extra:
             p.setPen(muted)
             font = QtGui.QFont(self.font())
@@ -252,9 +275,14 @@ class OverlayMenu(QtWidgets.QWidget):
         self.on_activate = on_activate
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.card = Card(self)
-        self.layout_ = QtWidgets.QVBoxLayout(self.card)
-        self.layout_.setContentsMargins(0, 4, 0, 4)
+        self.outer = QtWidgets.QVBoxLayout(self.card)
+        self.outer.setContentsMargins(0, 4, 0, 4)
+        self.outer.setSpacing(0)
+        self.body = QtWidgets.QWidget()
+        self.layout_ = QtWidgets.QVBoxLayout(self.body)
+        self.layout_.setContentsMargins(0, 0, 0, 0)
         self.layout_.setSpacing(0)
+        self.scroll = None
         self.rows = []
         self.min_width = min_width
         self.build(entries)
@@ -272,11 +300,42 @@ class OverlayMenu(QtWidgets.QWidget):
                 width = max(width, widget.preferred_width())
             elif widget.sizeHint().width() > 0:
                 width = max(width, widget.sizeHint().width())
-        width = min(width, 420)
+        self.width_ = min(width, 420)
+        self.relayout()
+
+    def relayout(self):
+        """Size the card to its rows; long menus scroll inside the window."""
+        width = self.width_
+        self.body.setFixedWidth(width)
+        self.body.adjustSize()
+        height = self.body.sizeHint().height() + 8
+        limit = max(160, self.host.height() - 16)
+        if height > limit and self.scroll is None:
+            self.scroll = QtWidgets.QScrollArea()
+            self.scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            self.scroll.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.scroll.setStyleSheet(
+                'QScrollArea, QScrollArea > QWidget > QWidget '
+                '{ background: transparent; }')
+            self.scroll.setWidget(self.body)
+            self.outer.addWidget(self.scroll)
+        elif self.scroll is None and self.body.parent() is None:
+            self.outer.addWidget(self.body)
+        if self.scroll is not None:
+            self.body.setFixedWidth(width)
+            self.scroll.setFixedSize(width, min(height, limit) - 8)
         self.card.setFixedWidth(width)
         self.card.adjustSize()
+        self.card.setFixedHeight(min(height, limit))
         self.resize(width + 2 * SHADOW, self.card.height() + 2 * SHADOW)
         self.card.move(SHADOW, SHADOW)
+
+    def close_all_menus(self):
+        root = self
+        while root.parent_menu:
+            root = root.parent_menu
+        root.close_all()
 
     def _make(self, entry):
         kind = entry[0]
@@ -287,7 +346,8 @@ class OverlayMenu(QtWidgets.QWidget):
         if kind == 'widget':
             return entry[1](self)
         if kind == 'submenu':
-            row = MenuRow(self, entry[1], submenu=entry[2])
+            opts = entry[3] if len(entry) > 3 else {}
+            row = MenuRow(self, entry[1], submenu=entry[2], **opts)
             self.rows.append(row)
             return row
         if kind == 'action':
@@ -435,21 +495,37 @@ class OverlayMenu(QtWidgets.QWidget):
 
 
 class MenuHost(QtCore.QObject):
-    """Closes a host's overlay menus on outside clicks and Escape."""
+    """Closes a host's overlay menus on outside clicks and Escape. It only
+    watches the app's events while one of its menus is open, so closed
+    boards never get called back."""
 
     def __init__(self, host):
         super().__init__(host)
         self.host = host
         self.menus = []
-        QtWidgets.QApplication.instance().installEventFilter(self)
+        self.watching = False
 
     def show(self, menu, anchor, align='cursor'):
         self.close_all()
         self.menus.append(menu)
-        menu.closed.connect(lambda: self.menus.remove(menu)
-                            if menu in self.menus else None)
+        menu.closed.connect(lambda: self._closed(menu))
         menu.popup(anchor, align)
+        self._watch(True)
         return menu
+
+    def _closed(self, menu):
+        if menu in self.menus:
+            self.menus.remove(menu)
+        if not self.menus:
+            self._watch(False)
+
+    def _watch(self, on):
+        app = QtWidgets.QApplication.instance()
+        if on and not self.watching:
+            app.installEventFilter(self)
+        elif not on and self.watching:
+            app.removeEventFilter(self)
+        self.watching = on
 
     def close_all(self):
         for menu in list(self.menus):
@@ -459,7 +535,7 @@ class MenuHost(QtCore.QObject):
         return bool(self.menus)
 
     def eventFilter(self, obj, event):
-        if not self.menus:
+        if not getattr(self, 'menus', None):
             return False
         etype = event.type()
         if etype == QtCore.QEvent.Type.MouseButtonPress:

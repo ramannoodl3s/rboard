@@ -175,12 +175,15 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             # overlaps other images. The way we do it here only works
             # as long as the canvas colour is itself grayscale,
             # though.
+            # R Board: paint in RGB, then convert. Painting straight onto
+            # a Grayscale8 image intermittently crashed Qt's raster engine.
             img = QtGui.QImage(
-                self.pixmap().size(), QtGui.QImage.Format.Format_Grayscale8)
+                self.pixmap().size(), QtGui.QImage.Format.Format_RGB32)
             img.fill(QtGui.QColor(*COLORS['Scene:Canvas']))
             painter = QtGui.QPainter(img)
             painter.drawPixmap(0, 0, self.pixmap())
             painter.end()
+            img = img.convertToFormat(QtGui.QImage.Format.Format_Grayscale8)
             self._grayscale_pixmap = QtGui.QPixmap.fromImage(img)
 
             # Alternative methods that have their own issues:
@@ -317,6 +320,9 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         item.setOpacity(self.opacity())
         item.grayscale = self.grayscale
         item.meta = dict(self.meta)
+        # A copy is a new image: it doesn't inherit the original's links
+        item.meta.pop('uid', None)
+        item.meta.pop('links', None)
         if self.flip() == -1:
             item.do_flip()
         item.crop = self.crop

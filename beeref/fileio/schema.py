@@ -1,5 +1,13 @@
 USER_VERSION = 2
 APPLICATION_ID = 2060242126
+# R Board boards (.brd): BeeRef's tables plus a table of board-level data
+RBOARD_APPLICATION_ID = 0x52425244  # 'RBRD'
+BOARD_TABLE = """
+    CREATE TABLE IF NOT EXISTS board (
+        key TEXT PRIMARY KEY,
+        value JSON
+    )
+"""
 
 
 SCHEMA = [

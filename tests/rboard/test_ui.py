@@ -5,10 +5,10 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from beeref.fileio.sql import SQLiteIO
 from beeref.items import BeePixmapItem
-from beeref.rboard import attributes, pen
+from beeref.rboard import attributes, links, pen
 from beeref.rboard.subboards import SUBBOARD_DISABLED
 from beeref.rboard.ui import icons, theme as T
-from beeref.rboard.ui.menu import OverlayMenu, clean_label
+from beeref.rboard.ui.menu import SectionLabel, OverlayMenu, clean_label
 from beeref.rboard.ui.theme import tm
 
 
@@ -238,7 +238,7 @@ def test_nested_subboard_from_image_menu(view):
     board = open_board(view)
     sv = board.window.view
     item = next(i for i in sv.rb_images() if i.link_source is red_image)
-    menu = OverlayMenu(sv, sv.rb_image_menu(item))
+    menu = OverlayMenu(sv, sv.rb_tag_entries(item))
     red = next(r for r in menu.rows if r.label == 'red')
     assert red.count == 2
     red.callback()
@@ -255,9 +255,17 @@ def test_right_click_menus(view):
     view.on_action_fit_scene()
     centre = view.mapFromScene(item.sceneBoundingRect().center())
     view.rb_context_menu(centre)
-    labels = [r.label for r in view.menu_host.menus[0].rows]
-    assert 'red' in labels and 'add note…' in labels and 'delete' in labels
+    menu = view.menu_host.menus[0]
+    labels = [r.label for r in menu.rows]
+    assert labels[:2] == ['tags', 'view palette']
+    assert 'add note…' in labels and 'delete' in labels
     assert item.isSelected()
+    # One tags list: main tags, your tags, then the rest
+    menu.open_submenu(menu.rows[0])
+    tags = menu.child
+    sections = [w.text for w in tags.body.findChildren(SectionLabel)]
+    assert sections == ['main', 'your tags', 'found']
+    assert [r.label for r in tags.rows][:2] == ['red', 'mid']
     view.menu_host.close_all()
     view.rb_context_menu(QtCore.QPoint(2, 2))
     labels = [r.label for r in view.menu_host.menus[0].rows]
@@ -335,3 +343,140 @@ def test_settings_dialog_switches_theme(view):
     card.click()
     assert tm().theme['id'] == 'pictogram'
     dialog.close()
+
+
+# ---------- links between images ----------
+
+def test_links_draw_undo_and_tree(view):
+    a, b, c, d = add_images(view, [('#e02020', 60, 40)] * 4)
+    view.rb_add_link(a, b)
+    view.rb_add_link(b, c)
+    assert links.edges(view.rb_images()) == [(a, b), (b, c)]
+    assert links.tree(c, view.rb_images()) == [c, b, a]
+    assert links.levels([a, b, c]) == [[a], [b], [c]]
+    # Linking back the other way replaces the old direction
+    view.rb_add_link(c, b)
+    assert (c, b) in links.edges(view.rb_images())
+    assert (b, c) not in links.edges(view.rb_images())
+    view.undo_stack.undo()
+    assert (b, c) in links.edges(view.rb_images())
+    # A copy of an image doesn't inherit its links
+    copy = a.create_copy()
+    assert 'uid' not in copy.meta and 'links' not in copy.meta
+
+
+def test_link_arrow_hit_and_menu(view):
+    a, b = add_images(view, [('#e02020', 60, 40), ('#2040d0', 60, 40)])
+    view.on_action_fit_scene()
+    view.rb_add_link(a, b)
+    (_, _, start, end), = view.rb_link_lines()
+    middle = (start + end) / 2
+    assert view.rb_link_at(middle.toPoint()) == (a, b)
+    view.rb_context_menu(middle.toPoint())
+    labels = [r.label for r in view.menu_host.menus[0].rows]
+    assert 'remove link' in labels and 'reverse direction' in labels
+
+
+def test_link_by_dragging_the_handle(view):
+    a, b = add_images(view, [('#e02020', 60, 40), ('#2040d0', 60, 40)])
+    view.on_action_fit_scene()
+    view.link_hover = a
+    handle = view.rb_handle_center(a)
+    target = view.rb_viewport_rect(b).center()
+
+    def event(kind, pos):
+        types = {'press': QtCore.QEvent.Type.MouseButtonPress,
+                 'move': QtCore.QEvent.Type.MouseMove,
+                 'release': QtCore.QEvent.Type.MouseButtonRelease}
+        return QtGui.QMouseEvent(
+            types[kind], pos, view.viewport().mapToGlobal(pos),
+            QtCore.Qt.MouseButton.LeftButton,
+            QtCore.Qt.MouseButton.LeftButton,
+            QtCore.Qt.KeyboardModifier.NoModifier)
+
+    assert view.rb_link_event(event('press', handle), 'press')
+    assert view.rb_link_event(event('move', target), 'move')
+    assert view.rb_link_event(event('release', target), 'release')
+    assert links.edges(view.rb_images()) == [(a, b)]
+
+
+def test_link_tree_subboard(view):
+    a, b, c, lone = add_images(view, [('#e02020', 60, 40)] * 4)
+    view.rb_add_link(a, b)
+    view.rb_add_link(a, c)
+    view.rb_open_link_tree(b)
+    board = view.subboards.boards[-1]
+    assert set(board.sources) == {a, b, c}
+    assert board.rows == [[a], [b, c]]
+    sv = board.window.view
+    copies = {i.link_source: i for i in sv.rb_images()}
+    # Arrows show in the sub board too (links follow the images)
+    assert len(sv.rb_link_lines()) == 2
+    assert copies[a].pos().y() < copies[b].pos().y()
+    menu = OverlayMenu(sv, sv.rb_image_menu(copies[a]))
+    labels = [r.label for r in menu.rows]
+    assert 'open link tree' in labels
+    board.window.close()
+
+
+# ---------- board files, font, size ----------
+
+def test_brd_keeps_board_data(view, tmp_path):
+    a, b = add_images(view, [('#e02020', 60, 40), ('#2040d0', 60, 40)])
+    view.rb_add_link(a, b)
+    view.rb_add_tag([a], 'mine')
+    view.scale(2, 2)
+    path = str(tmp_path / 'board.brd')
+    view.scene.board_data = view.rb_board_data()
+    SQLiteIO(path, view.scene, create_new=True).write()
+    import sqlite3
+    con = sqlite3.connect(path)
+    assert con.execute('PRAGMA application_id').fetchone()[0] == 0x52425244
+    con.close()
+    view.scene.clear()
+    SQLiteIO(path, view.scene, readonly=True).read()
+    view.scene.add_queued_items()
+    data = view.scene.loaded_board_data
+    assert data['tags'] == ['mine']
+    assert abs(data['view']['scale'] - view.get_scale()) < 1e-6
+    images = view.rb_images()
+    assert len(links.edges(images)) == 1
+    view.setTransform(QtGui.QTransform())
+    assert view.rb_restore_view(data)
+    assert abs(view.get_scale() - data['view']['scale']) < 1e-6
+
+
+def test_saving_a_bee_board_writes_brd_next_to_it(view, tmp_path):
+    add_images(view, [('#e02020', 60, 40)])
+    view.filename = str(tmp_path / 'old.bee')
+    with patch.object(view, 'do_save') as do_save:
+        view.on_action_save()
+    do_save.assert_called_once_with(str(tmp_path / 'old.brd'),
+                                    create_new=True)
+
+
+def test_interface_scale_and_font(settings, qapp, tmp_path):
+    import os
+    settings.setValue('Appearance/ui_scale', 200)
+    with patch.dict(os.environ, {}, clear=False) as env:
+        env.pop('QT_SCALE_FACTOR', None)
+        with patch.object(T, 'system_scale', return_value=1.0):
+            T.apply_interface_scale(settings)
+            assert env['QT_SCALE_FACTOR'] == '2.000'
+        env.pop('QT_SCALE_FACTOR')
+        with patch.object(T, 'system_scale', return_value=2.0):
+            T.apply_interface_scale(settings)  # Windows already scales
+            assert 'QT_SCALE_FACTOR' not in env
+    font_file = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'),
+                             'Fonts', 'arial.ttf')
+    if not os.path.isfile(font_file):
+        pytest.skip('no font file to add')
+    with patch.object(T, 'fonts_dir', return_value=str(tmp_path)):
+        family, copied = T.add_font_file(font_file)
+    assert family == 'Arial' and os.path.isfile(copied)
+    settings.setValue('Appearance/font_file', copied)
+    T.load_custom_font()
+    assert T.ui_font(12).family() == 'Arial'
+    settings.setValue('Appearance/font_file', '')
+    T.load_custom_font()
+    assert T._custom['family'] is None

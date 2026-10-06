@@ -21,7 +21,8 @@ from beeref.rboard import attributes, pen as penlib, semantic
 from beeref.rboard.ui import icons
 from beeref.rboard.ui.dialogs import NoteDialog, TagField
 from beeref.rboard.ui.homebar import HomeBar, StatusPill
-from beeref.rboard.ui.menu import MenuHost, OverlayMenu, section_font
+from beeref.rboard.ui.menu import (
+    ROW_H, MenuHost, OverlayMenu, section_font)
 from beeref.rboard.ui.theme import px, tm, ui_font
 
 
@@ -36,57 +37,21 @@ ATTRIBUTE_ICONS = {
 }
 
 
-class TagPills(QtWidgets.QWidget):
-    """The image menu's tag row: one pill per tag, plus '+ add tag'."""
+class AddTagRow(QtWidgets.QWidget):
+    """'+ add tag…' in the tags menu; turns into a field when clicked."""
 
-    def __init__(self, menu, tags, on_open, on_remove, on_add, existing):
+    def __init__(self, menu, existing, on_add):
         super().__init__()
         self.menu = menu
-        layout = FlowLayout(self, spacing=4)
-        layout.setContentsMargins(36, 2, 10, 8)
-        for tag in tags:
-            layout.addWidget(Pill(tag, lambda t=tag: on_open(t),
-                                  lambda t=tag: on_remove(t)))
-        self.field = None
-        self.add_pill = Pill('+ add tag', self.start_add, dashed=True)
-        layout.addWidget(self.add_pill)
-        self.on_add = on_add
         self.existing = existing
-        self.setFixedHeight(layout.heightForWidth(300))
-
-    def start_add(self):
-        self.add_pill.hide()
-        self.field = TagField(self.existing)
-        self.field.setFixedWidth(150)
-        self.field.submitted.connect(self.submit)
-        self.layout().addWidget(self.field)
-        self.setFixedHeight(self.layout().heightForWidth(self.width() or 300))
-        self.field.setFocus()
-        self.menu.card.adjustSize()
-        self.menu.resize(self.menu.card.width() + 36,
-                         self.menu.card.height() + 36)
-
-    def submit(self, tag):
-        self.menu.close_all()
-        self.on_add(tag)
+        self.on_add = on_add
+        self.hovered = False
+        self.field = None
+        self.setFixedHeight(ROW_H)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def preferred_width(self):
         return 0
-
-
-class Pill(QtWidgets.QWidget):
-    def __init__(self, text, on_click, on_remove=None, dashed=False):
-        super().__init__()
-        self.text = text
-        self.on_click = on_click
-        self.on_remove = on_remove
-        self.dashed = dashed
-        self.hovered = False
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        fm = self.fontMetrics()
-        extra = 16 if on_remove else 0
-        self.setFixedSize(fm.horizontalAdvance(text) + 30 + extra, 22)
-        self.setToolTip('open as sub board' if on_remove else '')
 
     def enterEvent(self, e):
         self.hovered = True
@@ -96,92 +61,67 @@ class Pill(QtWidgets.QWidget):
         self.hovered = False
         self.update()
 
-    def remove_rect(self):
-        return QtCore.QRectF(self.width() - 20, 3, 16, 16)
-
     def mouseReleaseEvent(self, e):
-        if self.on_remove and self.remove_rect().contains(e.position()):
-            self.on_remove()
-        else:
-            self.on_click()
+        if self.field is None:
+            self.start()
+
+    def start(self):
+        self.field = TagField(self.existing)
+        self.field.setParent(self)
+        self.field.setGeometry(32, 2, self.width() - 44, self.height() - 4)
+        self.field.submitted.connect(self.submit)
+        self.field.show()
+        self.field.setFocus()
+        self.update()
+
+    def submit(self, tag):
+        self.menu.close_all_menus()
+        self.on_add(tag)
 
     def paintEvent(self, e):
+        if self.field is not None:
+            return
         t = tm()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        pen = QtGui.QPen(t.color('control-border'), 1)
-        if self.dashed:
-            pen.setStyle(Qt.PenStyle.DashLine)
-        p.setPen(pen)
-        p.setBrush(t.color('hover') if self.hovered else Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(
-            QtCore.QRectF(self.rect()).adjusted(.5, .5, -.5, -.5),
-            11, 11)
-        if not self.dashed:
+        rect = QtCore.QRectF(self.rect()).adjusted(4, 0, -4, 0)
+        if self.hovered:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QtGui.QColor(t.hex('palette-violet')))
-            p.drawEllipse(QtCore.QPointF(12, 11), 4, 4)
-        p.setPen(t.color('ink'))
-        p.drawText(QtCore.QRectF(22 if not self.dashed else 10, 0,
-                                 self.width(), 22),
-                   Qt.AlignmentFlag.AlignVCenter, self.text)
-        if self.on_remove and self.hovered:
-            icons.draw(p, 'close', t.hex('ink-muted'), self.remove_rect())
+            p.setBrush(t.color('hover'))
+            p.drawRoundedRect(rect, px('radius-sm'), px('radius-sm'))
+        icons.draw(p, 'plus', t.hex('ink-muted'),
+                   QtCore.QRectF(rect.x() + 8, 0, 16, self.height()))
+        p.setPen(t.color('ink-muted'))
+        p.drawText(QtCore.QRectF(rect.x() + 32, 0, rect.width() - 32,
+                                 self.height()),
+                   Qt.AlignmentFlag.AlignVCenter, 'add tag…')
 
 
-class FlowLayout(QtWidgets.QLayout):
-    """Wrapping row layout for tag pills."""
+class PaletteStrip(QtWidgets.QWidget):
+    """The palette as one bar, each colour as wide as its share."""
 
-    def __init__(self, parent=None, spacing=4):
-        super().__init__(parent)
-        self.items = []
-        self.setSpacing(spacing)
+    def __init__(self, colors):
+        super().__init__()
+        self.colors = colors
+        self.setFixedHeight(40)
 
-    def addItem(self, item):
-        self.items.append(item)
+    def preferred_width(self):
+        return 240
 
-    def count(self):
-        return len(self.items)
-
-    def itemAt(self, i):
-        return self.items[i] if 0 <= i < len(self.items) else None
-
-    def takeAt(self, i):
-        return self.items.pop(i) if 0 <= i < len(self.items) else None
-
-    def hasHeightForWidth(self):
-        return True
-
-    def heightForWidth(self, width):
-        return self._place(QtCore.QRect(0, 0, width, 0), apply=False)
-
-    def setGeometry(self, rect):
-        super().setGeometry(rect)
-        self._place(rect, apply=True)
-
-    def sizeHint(self):
-        return self.minimumSize()
-
-    def minimumSize(self):
-        h = self.heightForWidth(260)
-        return QtCore.QSize(160, h)
-
-    def _place(self, rect, apply):
-        m = self.contentsMargins()
-        x, y = rect.x() + m.left(), rect.y() + m.top()
-        line_h = 0
-        right = rect.right() - m.right()
-        for item in self.items:
-            size = item.sizeHint()
-            if x + size.width() > right and line_h:
-                x = rect.x() + m.left()
-                y += line_h + self.spacing()
-                line_h = 0
-            if apply:
-                item.setGeometry(QtCore.QRect(QtCore.QPoint(x, y), size))
-            x += size.width() + self.spacing()
-            line_h = max(line_h, size.height())
-        return y + line_h - rect.y() + m.bottom()
+    def paintEvent(self, e):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        rect = QtCore.QRectF(self.rect()).adjusted(12, 8, -12, -8)
+        path = QtGui.QPainterPath()
+        path.addRoundedRect(rect, 6, 6)
+        p.setClipPath(path)
+        total = sum(share for _, share in self.colors) or 1
+        x = rect.x()
+        for hex_, share in self.colors:
+            w = rect.width() * share / total
+            p.fillRect(QtCore.QRectF(x, rect.y(), w + 1, rect.height()),
+                       QtGui.QColor(hex_))
+            x += w
 
 
 class NoteHover(QtCore.QObject):
@@ -224,6 +164,7 @@ class BoardUIMixin:
         self.status_pill = StatusPill(self, self.home_bar)
         self.note_hover_item = None
         self.note_hover = NoteHover(self)
+        self.rb_init_links()
         self.pen_active = False
         self._pen_points = None
         self._pen_preview = None
@@ -237,6 +178,10 @@ class BoardUIMixin:
 
     def _rb_scene_changed(self, region):
         self.status_timer.start()
+        if self.link_hover is not None or any(
+                'links' in i.meta for i in self.rb_images()):
+            # Arrows and the link handle follow images that moved
+            self.viewport().update()
 
     def rb_manager(self):
         return self.manager if self.is_subboard else self.subboards
@@ -392,7 +337,9 @@ class BoardUIMixin:
                 ('action', 'reset_crop', 'crop'),
                 ('action', 'reset_transforms', 'everything')]),
             ('sep',), ('label', 'colour'),
-            ('action', 'generate_palette', 'make a palette…'),
+            ('submenu', 'view palette', lambda: self.rb_palette_entries(
+                self.rb_selected(images_only=True, all_if_empty=True)),
+             {'icon': 'palette'}),
             ('action', 'sample_color', 'pick a colour'),
             ('action', 'show_color_gamut', 'colour spread'),
             ('sep',), ('label', 'content'),
@@ -549,6 +496,11 @@ class BoardUIMixin:
         if self.pen_active:
             return
         item = self.rb_user_item_at(point)
+        link = self.rb_link_at(point) if item is None else None
+        if link is not None:
+            self.menu_host.show(OverlayMenu(self, self.rb_link_menu(link),
+                                            min_width=220), point)
+            return
         if item is not None and not item.isSelected():
             self.scene.clearSelection()
             item.setSelected(True)
@@ -595,65 +547,125 @@ class BoardUIMixin:
             return images, sources
         return images, images
 
+    def rb_open_attribute(self, item, key, label):
+        """Open the sub board for one of the image's tags."""
+        images, sources = self.rb_candidates()
+        source = getattr(item, 'link_source', item)
+        parent = self.board if self.is_subboard else None
+        self.rb_manager().open_attribute(key, label, sources, parent,
+                                         anchor=source)
+
+    def rb_tag_entries(self, item):
+        """One list of the image's tags, each opening its sub board: the
+        main ones (colour, tone, kind, mood, style), your tags, then
+        everything else that was found."""
+        images, _ = self.rb_candidates()
+        counts = attributes.counts(images)
+        targets = self.rb_targets(item)
+        main, tags, auto = attributes.grouped(item)
+
+        def row(key, label, dot, **extra):
+            prefix = key.split(':')[0]
+            opts = {'dot': dot, 'icon': ATTRIBUTE_ICONS.get(prefix),
+                    'hint': attributes.HINTS.get(prefix, ''),
+                    'count': counts.get(key, 0),
+                    'tooltip': 'open as a sub board'}
+            opts.update(extra)
+            return ('item', label,
+                    lambda: self.rb_open_attribute(item, key, label), opts)
+
+        entries = [('label', 'main')]
+        entries += [row(k, label, dot) for k, label, dot, _ in main]
+        if semantic.vector(item) is None:
+            entries.append(('item', 'find kind, mood and style…',
+                            self.on_action_index_content,
+                            {'icon': 'sparkle', 'tooltip':
+                             'reads what the images show (on this computer)'}))
+        entries += [('sep',), ('label', 'your tags')]
+        entries += [row(k, label, dot, on_remove=lambda t=label:
+                        self.rb_remove_tag(targets, t))
+                    for k, label, dot, _ in tags]
+        entries.append(('widget', lambda m: AddTagRow(
+            m, attributes.all_tags(images),
+            lambda t: self.rb_add_tag(targets, t))))
+        entries += [('sep',), ('label', 'found')]
+        entries += [row(k, label, dot) for k, label, dot, _ in auto]
+        similar = attributes.similar_to(item, images)
+        if len(similar) > 1:
+            entries.append(('item', 'visually similar',
+                            lambda: self.rb_open_attribute(
+                                item, 'similar', 'similar images'),
+                            {'icon': 'eye', 'count': len(similar),
+                             'tooltip': 'open as a sub board'}))
+        return entries
+
+    def rb_palette_entries(self, images):
+        if not images:
+            return [('item', 'no images yet', None, {'enabled': False})]
+        colors = self.rb_palette(images)
+        if not colors:
+            return [('item', 'no colours found', None, {'enabled': False})]
+
+        def copy(text, what):
+            QtWidgets.QApplication.clipboard().setText(text)
+            self.scene.internal_clipboard = []
+            self.rb_notify(f'copied {what}')
+
+        entries = [('widget', lambda m: PaletteStrip(colors))]
+        for hex_, share in colors:
+            entries.append(('item', hex_, lambda h=hex_: copy(h, h),
+                            {'dot': hex_, 'hint': f'{share:.0%}',
+                             'tooltip': 'copy this hex code'}))
+        codes = '\n'.join(h for h, _ in colors)
+        entries += [('sep',),
+                    ('item', 'copy all hex codes',
+                     lambda: copy(codes, f'{len(colors)} hex codes'))]
+        return entries
+
+    def rb_show_palette(self, images):
+        """The palette menu next to the images (Shift+P)."""
+        entries = [('label', 'palette' if len(images) == 1 else
+                    f'palette of {len(images)} images')]
+        entries += self.rb_palette_entries(images)
+        rect = self.mapFromScene(self.scene.itemsBoundingRect(
+            items=images)).boundingRect()
+        point = QtCore.QPoint(min(rect.right() + 8, self.width() - 40),
+                              max(rect.top(), 8))
+        self.menu_host.show(OverlayMenu(self, entries, min_width=240), point)
+
     def rb_image_menu(self, item):
         images, sources = self.rb_candidates()
         if self.rb_analyze(images) is None:
             return []
-        source = getattr(item, 'link_source', item)
-        counts = attributes.counts(images)
-        manager = self.rb_manager()
-        parent = self.board if self.is_subboard else None
-
-        def open_board(key, label):
-            manager.open_attribute(key, label, sources, parent,
-                                   anchor=source)
-
+        self.rb_main().rb_refresh_profile()
+        main, tags, auto = attributes.grouped(item)
         w, h = int(item.crop.width()), int(item.crop.height())
         origin = ''
         if item.meta.get('arena_channel'):
             origin = ' · from ' + attributes.channel_name(
                 item.meta['arena_channel'])
         title = os.path.basename(item.filename) if item.filename else 'image'
+        summary = ', '.join(label for _, label, *_ in main[2:4])
         entries = [('widget', lambda m: Header(title, f'{w} × {h}{origin}')),
-                   ('sep',), ('label', 'open as sub board')]
-        for key, label, dot, kind in attributes.attributes(item):
-            if kind != 'auto':
-                continue
-            prefix = key.split(':')[0]
-            entries.append((
-                'item', label, lambda k=key, lb=label: open_board(k, lb),
-                {'dot': dot, 'icon': ATTRIBUTE_ICONS.get(prefix),
-                 'count': counts.get(key, 0), 'trailing_icon': 'subboard'}))
-        similar = attributes.similar_to(item, images)
-        if len(similar) > 1:
-            entries.append((
-                'item', 'visually similar',
-                lambda: open_board('similar', 'similar images'),
-                {'icon': 'eye', 'count': len(similar),
-                 'trailing_icon': 'subboard'}))
-        if semantic.vector(item) is None:
-            entries.append(('item', 'read image content…',
-                            self.on_action_index_content,
-                            {'icon': 'sparkle'}))
+                   ('sep',),
+                   ('submenu', 'tags', lambda: self.rb_tag_entries(item),
+                    {'icon': 'tag', 'hint': summary}),
+                   ('submenu', 'view palette',
+                    lambda: self.rb_palette_entries([item]),
+                    {'icon': 'palette'})]
 
         targets = self.rb_targets(item)
-        tags = attributes.tags_of(item)
         board_key = self.board.key if self.is_subboard else ''
         if board_key.startswith('tag:'):
             # Confirm or drop suggestions straight from the tag's board
             tag = board_key[4:]
-            entries += [('sep',), (
-                'item', f'remove from “{tag}”' if tag in tags
-                else f'add to “{tag}”',
-                (lambda: self.rb_remove_tag(targets, tag)) if tag in tags
+            has = tag in attributes.tags_of(item)
+            entries += [(
+                'item', f'remove from “{tag}”' if has else f'add to “{tag}”',
+                (lambda: self.rb_remove_tag(targets, tag)) if has
                 else (lambda: self.rb_add_tag(targets, tag)),
                 {'icon': 'star-outline'})]
-        entries += [('sep',), ('label', 'tags'), ('widget', lambda m: TagPills(
-            m, tags,
-            on_open=lambda t: open_board(f'tag:{t}', t),
-            on_remove=lambda t: self.rb_remove_tag(targets, t),
-            on_add=lambda t: self.rb_add_tag(targets, t),
-            existing=attributes.all_tags(images)))]
+        entries += self.rb_link_entries(item)
 
         has_note = bool(item.meta.get('note'))
         entries += [
@@ -761,6 +773,7 @@ class BoardUIMixin:
         super().drawForeground(painter, rect)
         if not hasattr(self, 'note_hover_item'):
             return
+        self.rb_paint_links(painter)
         show_all = self.settings.valueOrDefault('Appearance/show_notes')
         items = []
         if show_all:

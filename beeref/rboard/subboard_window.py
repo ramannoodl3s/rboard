@@ -136,6 +136,8 @@ class SubBoardWindow(QtWidgets.QMainWindow):
                 self.add_header(text, x, y, scale)
         elif self.board.sections:
             self.populate_sections(live)
+        elif self.board.rows:
+            self.populate_tree(live)
         else:
             items = []
             for source in self.board.sources:
@@ -194,6 +196,45 @@ class SubBoardWindow(QtWidgets.QMainWindow):
                 item.setPos(item.pos() + QtCore.QPointF(x, y + py)
                             - rect.topLeft())
             y += layouts.bounds(sizes, placements)[1] + gap * 8
+
+    def populate_tree(self, live):
+        """A link tree as a flowchart: one centred row per level, images
+        at the same height, room between rows for the arrows."""
+        scene = self.view.scene
+        rows = []
+        for sources in self.board.rows:
+            items = []
+            for source in sources:
+                if id(source) in live:
+                    item = linked_copy(source)
+                    scene.addItem(item)
+                    items.append(item)
+            if items:
+                rows.append(items)
+        everything = [i for row in rows for i in row]
+        if not everything:
+            return
+        gap = self.view.rb_gap(everything)
+        heights = sorted(scene.itemsBoundingRect(items=[i]).height()
+                         for i in everything)
+        row_h = heights[len(heights) // 2]
+        widths = []
+        for row in rows:
+            for item in row:
+                rect = scene.itemsBoundingRect(items=[item])
+                item.setScale(item.scale() * row_h / max(rect.height(), 1))
+            widths.append(sum(scene.itemsBoundingRect(items=[i]).width()
+                              for i in row) + gap * 4 * (len(row) - 1))
+        widest = max(widths)
+        y = 0
+        for row, width in zip(rows, widths):
+            x = (widest - width) / 2
+            for item in row:
+                rect = scene.itemsBoundingRect(items=[item])
+                item.setPos(item.pos() + QtCore.QPointF(x, y)
+                            - rect.topLeft())
+                x += rect.width() + gap * 4
+            y += row_h * 1.6
 
     def layout_snapshot(self):
         out = []

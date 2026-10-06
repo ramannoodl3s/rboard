@@ -140,6 +140,7 @@ menu_structure = [
             'add_note',
             'show_notes',
             'tag_images',
+            'link_images',
             MENU_SEPARATOR,
             'extract_text',
             'index_text',

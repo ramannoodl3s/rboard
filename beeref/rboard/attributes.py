@@ -139,6 +139,34 @@ def attributes(item):
     return out
 
 
+MAIN = ('color', 'tone', 'kind', 'mood', 'style')
+HINTS = {'color': 'colour', 'tone': 'tone', 'kind': 'kind', 'mood': 'mood',
+         'style': 'style', 'looks': 'subject', 'shape': 'shape',
+         'cover': 'guess'}
+
+
+def grouped(item):
+    """The image's tags in menu order: main ones (colour, tone, kind, mood,
+    style), your own tags, then the rest of what was found."""
+    main, tags, auto = [], [], []
+    for entry in attributes(item):
+        prefix = entry[0].split(':')[0]
+        if entry[3] == 'tag':
+            tags.append(entry)
+        elif prefix in MAIN:
+            main.append(entry)
+        else:
+            auto.append(entry)
+    main.sort(key=lambda e: MAIN.index(e[0].split(':')[0]))
+    return main, tags, auto
+
+
+def search_words(item):
+    """Tag names that search should find the image by."""
+    return ' '.join(label for key, label, *_ in attributes(item)
+                    if key.split(':')[0] in MAIN + ('looks',))
+
+
 def keys_of(item):
     return {key for key, *_ in attributes(item)}
 

@@ -306,7 +306,7 @@ actions = ActionList([
     ),
     Action(
         id='generate_palette',
-        text='Generate &Palette...',
+        text='View &Palette',
         shortcuts=['Shift+P'],
         callback='on_action_generate_palette',
         group='active_when_items_in_scene',
@@ -420,6 +420,13 @@ actions = ActionList([
         text='&Tag Images...',
         shortcuts=['T'],
         callback='on_action_tag_images',
+        group='active_when_selection',
+    ),
+    Action(
+        id='link_images',
+        text='&Link Images',
+        shortcuts=['L'],
+        callback='on_action_link_images',
         group='active_when_selection',
     ),
     Action(

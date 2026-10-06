@@ -27,10 +27,19 @@ def item_with(vec, w=60, h=40, tags=()):
 
 @pytest.fixture
 def tiny_vocab():
-    """A three-label vocabulary on the first three axes."""
-    vocab = (['album cover', 'interior', 'car'],
-             np.stack([unit(1), unit(0, 1), unit(0, 0, 1)]))
-    with patch.object(semantic, '_vocab', vocab):
+    """Tiny vocabularies, each label on its own axis: kinds 'album cover'
+    (axis 0) and 'poster' (3); subjects 'interior' (1) and 'car' (2);
+    moods 'calm' (4) and 'tense' (5)."""
+    vocab = (['interior', 'car'], np.stack([unit(0, 1), unit(0, 0, 1)]))
+    axes = np.eye(512, dtype=np.float32)
+    facets = {
+        'kind': (['album cover', 'poster'], axes[[0, 3]]),
+        'mood': (['calm', 'tense'], axes[[4, 5]]),
+        'style': (['minimalist', 'punk'], axes[[6, 7]]),
+    }
+    with patch.object(semantic, '_vocab', vocab),             patch.dict(semantic._facets, facets, clear=True),             patch.object(semantic, 'KINDS', [('album cover', ''),
+                                             ('poster', '')]):
+        semantic.set_profile(np.zeros((0, 512), np.float32))
         yield vocab
 
 
@@ -44,14 +53,30 @@ def test_store_and_read_back(qapp):
 
 def test_entries_and_album_cover(qapp, tiny_vocab):
     cover = item_with(unit(1, 0.05), 300, 300)
-    room = item_with(unit(0.02, 1), 300, 300)
-    assert ('cover:album', 'album cover', None, 'auto') in \
+    room = item_with(unit(0, 1, 0, 0.9), 300, 300)
+    assert ('kind:album cover', 'album cover', None, 'auto') in \
         semantic.entries(cover)
-    assert ('looks:interior', 'looks like · interior', None, 'auto') in \
-        semantic.entries(room)
+    entries = semantic.entries(room)
+    assert ('kind:poster', 'poster', None, 'auto') in entries
+    assert ('looks:interior', 'interior', None, 'auto') in entries
     # With the model's verdict, the shape-based guess is not used
     keys = attributes.keys_of(room)
-    assert 'cover:album' not in keys and 'cover:likely' not in keys
+    assert 'kind:album cover' not in keys and 'cover:likely' not in keys
+
+
+def test_mood_is_judged_against_the_board(qapp, tiny_vocab):
+    # Every image is a bit "calm"; one is much more "tense" than the rest
+    usual = [item_with(unit(1, 0, 0, 0, 0.4, 0.2)) for _ in range(12)]
+    odd = item_with(unit(1, 0, 0, 0, 0.4, 0.9))
+    semantic.set_profile(semantic.matrix(usual + [odd])[1])
+    assert ('mood:tense', 'tense', None, 'auto') in semantic.entries(odd)
+    assert not [e for e in semantic.entries(usual[0])
+                if e[0].startswith('mood:')]
+    item = odd
+    item.meta['analysis'] = {'dominant': '#2040d0', 'average': '#2040d0'}
+    main, tags, auto = attributes.grouped(item)
+    assert [k.split(':')[0] for k, *_ in main] == ['color', 'tone', 'kind',
+                                                   'mood']
 
 
 def test_unindexed_square_falls_back_to_guess(qapp):
@@ -166,9 +191,13 @@ def test_real_model_recognises_a_cd(qapp):
     labels, emb = semantic.vocabulary()
     probs = semantic.probabilities(vec[None], emb)[0]
     assert labels[int(probs.argmax())] in ('CD', 'vinyl record')
+    assert semantic.facet('mood')[1].shape == (len(semantic.MOODS), 512)
 
 
 def test_shipped_vocabulary_matches_labels():
     data = np.load(semantic.VOCAB_FILE)
     assert [str(x) for x in data['labels']] == semantic.LABELS
     assert data['embeddings'].shape == (len(semantic.LABELS), 512)
+    for name in ('kind', 'mood', 'style'):
+        labels, _ = semantic._facet_prompts(name)
+        assert [str(x) for x in data[f'{name}_labels']] == labels

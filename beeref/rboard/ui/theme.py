@@ -76,10 +76,56 @@ FONT_CHOICES = {
     'medium': [('HelveticaNeueLT Std Med', None),
                ('Helvetica Neue', 'Medium'), ('Arial', None)],
 }
+WEIGHTS = {'light': QtGui.QFont.Weight.Light,
+           'regular': QtGui.QFont.Weight.Normal,
+           'medium': QtGui.QFont.Weight.Medium}
 _font_cache = {}
+_custom = {'family': None}
+
+
+def fonts_dir():
+    from beeref.config import BeeSettings
+    return os.path.join(os.path.dirname(BeeSettings().fileName()), 'fonts')
+
+
+def load_custom_font():
+    """Pick up the interface font chosen in settings: an added font file
+    or an installed family. Empty means the design's Helvetica Neue."""
+    from beeref.config import BeeSettings
+    settings = BeeSettings()
+    family = None
+    path = settings.valueOrDefault('Appearance/font_file')
+    if path and os.path.isfile(path):
+        font_id = QtGui.QFontDatabase.addApplicationFont(path)
+        families = QtGui.QFontDatabase.applicationFontFamilies(font_id)
+        family = families[0] if families else None
+    if family is None:
+        family = settings.valueOrDefault('Appearance/font_family') or None
+        if family and family not in QtGui.QFontDatabase.families():
+            family = None
+    _custom['family'] = family
+    _font_cache.clear()
+
+
+def add_font_file(path):
+    """Copy a font file into the settings folder; returns its family name
+    (or None if Qt can't read it) and the copied path."""
+    import shutil
+    font_id = QtGui.QFontDatabase.addApplicationFont(path)
+    families = QtGui.QFontDatabase.applicationFontFamilies(font_id)
+    if not families:
+        return None, None
+    os.makedirs(fonts_dir(), exist_ok=True)
+    target = os.path.join(fonts_dir(), os.path.basename(path))
+    if os.path.normcase(os.path.abspath(path)) != \
+            os.path.normcase(os.path.abspath(target)):
+        shutil.copyfile(path, target)
+    return families[0], target
 
 
 def font_spec(weight='regular'):
+    if _custom['family']:
+        return _custom['family'], None
     if weight not in _font_cache:
         families = set(QtGui.QFontDatabase.families())
         for family, style in FONT_CHOICES[weight]:
@@ -92,15 +138,40 @@ def font_spec(weight='regular'):
 
 
 def ui_font(size=12, weight='regular'):
-    """A QFont in the design's typeface at a pixel size."""
+    """A QFont in the interface typeface at a pixel size."""
     family, style = font_spec(weight)
     font = QtGui.QFont(family)
     if style:
         font.setStyleName(style)
-    if weight == 'medium' and family == 'Arial':
-        font.setWeight(QtGui.QFont.Weight.Medium)
+    elif _custom['family'] or family == 'Arial':
+        font.setWeight(WEIGHTS[weight])
     font.setPixelSize(size)
     return font
+
+
+def system_scale():
+    """Windows' display scaling for the main screen (1.0 = 100%), read
+    before Qt starts."""
+    if os.name != 'nt':
+        return 1.0
+    try:
+        import ctypes
+        percent = ctypes.windll.shcore.GetScaleFactorForDevice(0)
+        return max(1.0, percent / 100)
+    except (AttributeError, OSError):
+        return 1.0
+
+
+def apply_interface_scale(settings):
+    """Scale the whole interface (call before the QApplication exists).
+    The setting is relative to a 96 dpi screen, so screens Windows
+    already scales up aren't scaled twice."""
+    if 'QT_SCALE_FACTOR' in os.environ:
+        return
+    wanted = settings.valueOrDefault('Appearance/ui_scale') / 100
+    factor = wanted / system_scale()
+    if factor > 1.01:
+        os.environ['QT_SCALE_FACTOR'] = f'{factor:.3f}'
 
 
 def px(name):
@@ -251,6 +322,8 @@ class ThemeManager(QtCore.QObject):
                 return theme
 
     def load(self):
+        if QtWidgets.QApplication.instance() is not None:
+            load_custom_font()
         theme_id = self._settings().value('Appearance/theme', DEFAULT_THEME)
         self.set_theme(theme_id, save=False)
 

@@ -250,6 +250,15 @@ class ContentMixin:
             return
         self.rb_index_content(self.rb_images(), modal=False)
 
+    def rb_refresh_profile(self):
+        """Update the board's norm that moods and styles are judged
+        against, when the set of read images changed."""
+        indexed, vecs = semantic.matrix(self.rb_images())
+        signature = (id(self.scene), len(indexed))
+        if signature != getattr(self, '_profile_signature', None):
+            self._profile_signature = signature
+            semantic.set_profile(vecs)
+
     def rb_after_images_added(self):
         QtCore.QTimer.singleShot(500, self.rb_index_in_background)
 

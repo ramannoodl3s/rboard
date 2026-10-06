@@ -341,7 +341,7 @@ def test_on_action_save_as_when_no_filename(
 
 
 @patch('PyQt6.QtWidgets.QFileDialog.getSaveFileName')
-def test_on_action_save_as_filename_doesnt_end_with_bee(
+def test_on_action_save_as_filename_without_extension_gets_brd(
         dialog_mock, view, qtbot, imgfilename3x3, tmpdir):
     item = BeePixmapItem(QtGui.QImage(imgfilename3x3))
     view.scene.addItem(item)
@@ -352,8 +352,8 @@ def test_on_action_save_as_filename_doesnt_end_with_bee(
     dialog_mock.return_value = (filename, None)
     view.on_action_save_as()
     qtbot.waitUntil(lambda: view.on_saving_finished.called is True)
-    assert os.path.exists(f'{filename}.bee') is True
-    view.on_saving_finished.assert_called_once_with(f'{filename}.bee', [])
+    assert os.path.exists(f'{filename}.brd') is True
+    view.on_saving_finished.assert_called_once_with(f'{filename}.brd', [])
     view.cancel_active_modes.assert_called_once_with()
 
 
@@ -378,7 +378,7 @@ def test_on_action_save(view, qtbot, imgfilename3x3, tmpdir):
     item = BeePixmapItem(QtGui.QImage(imgfilename3x3))
     view.scene.addItem(item)
     view.cancel_active_modes = MagicMock()
-    view.filename = os.path.join(tmpdir, 'test.bee')
+    view.filename = os.path.join(tmpdir, 'test.brd')
     root = os.path.dirname(__file__)
     shutil.copyfile(os.path.join(root, 'assets', 'test1item.bee'),
                     view.filename)

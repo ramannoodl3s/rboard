@@ -8,6 +8,7 @@
 """The settings window: themes (presets and custom), board, tools,
 imports, keyboard and mouse."""
 
+import os
 import re
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -271,8 +272,89 @@ class AppearancePage(QtWidgets.QWidget):
             lambda: settings.setValue('Appearance/bar_hide_delay',
                                       self.hide_delay.currentData()))
         self.layout_.addWidget(FieldRow('hide the bar', self.hide_delay))
+
+        self.layout_.addWidget(section_label('text and size'))
+        self.scale = QtWidgets.QComboBox()
+        for percent in (100, 125, 150, 175, 200, 250, 300):
+            self.scale.addItem(f'{percent}%', percent)
+        index = self.scale.findData(
+            settings.valueOrDefault('Appearance/ui_scale'))
+        self.scale.setCurrentIndex(max(index, 0))
+        self.scale.currentIndexChanged.connect(self.on_scale)
+        self.layout_.addWidget(FieldRow('interface size', self.scale))
+        self.scale_note = caption('restart R Board to apply the new size.')
+        self.scale_note.setVisible(False)
+        self.layout_.addWidget(self.scale_note)
+
+        self.font_combo = QtWidgets.QComboBox()
+        self.font_combo.setMaxVisibleItems(16)
+        add_font = QtWidgets.QPushButton('add font file…')
+        add_font.clicked.connect(self.on_add_font)
+        font_row = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(font_row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(self.font_combo, 1)
+        h.addWidget(add_font)
+        self.layout_.addWidget(FieldRow('font', font_row))
+        self.fill_fonts()
+        self.font_combo.currentIndexChanged.connect(self.on_font)
         self.layout_.addStretch()
         self.populate()
+
+    # -- text and size --
+
+    def on_scale(self):
+        self.settings.setValue('Appearance/ui_scale',
+                               self.scale.currentData())
+        self.scale_note.setVisible(True)
+
+    def fill_fonts(self):
+        s = self.settings
+        combo = self.font_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem('Helvetica Neue (default)', ('', ''))
+        path = s.valueOrDefault('Appearance/font_file')
+        if path and os.path.isfile(path):
+            combo.addItem(f'{T.font_spec()[0]} (added file)', ('file', path))
+        for family in QtGui.QFontDatabase.families():
+            if not QtGui.QFontDatabase.isPrivateFamily(family):
+                combo.addItem(family, ('family', family))
+        if path and os.path.isfile(path):
+            combo.setCurrentIndex(1)
+        else:
+            index = combo.findData(
+                ('family', s.valueOrDefault('Appearance/font_family')))
+            combo.setCurrentIndex(max(index, 0))
+        combo.blockSignals(False)
+
+    def on_font(self):
+        kind, value = self.font_combo.currentData()
+        self.settings.setValue('Appearance/font_file',
+                               value if kind == 'file' else '')
+        self.settings.setValue('Appearance/font_family',
+                               value if kind == 'family' else '')
+        self.apply_font()
+
+    def on_add_font(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, 'add a font', '', 'Fonts (*.ttf *.otf *.ttc)')
+        if not path:
+            return
+        family, copied = T.add_font_file(path)
+        if family is None:
+            QtWidgets.QMessageBox.warning(
+                self, 'add a font', 'that file could not be read as a font.')
+            return
+        self.settings.setValue('Appearance/font_file', copied)
+        self.settings.setValue('Appearance/font_family', '')
+        self.apply_font()
+        self.fill_fonts()
+
+    def apply_font(self):
+        T.load_custom_font()
+        tm().preview(tm().theme)
+        self.window().setFont(T.ui_font(12))
 
     def populate(self):
         while self.grid.count():

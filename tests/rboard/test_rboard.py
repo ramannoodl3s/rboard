@@ -63,7 +63,16 @@ def test_sort_key_orders_rainbow_then_neutrals():
 def test_palette_returns_requested_colors(qapp):
     stats = [stats_for(solid(c)) for c in ('#ff0000', '#00ff00', '#0000ff')]
     colors = analysis.palette(stats, 3)
-    assert sorted(colors) == ['#0000ff', '#00ff00', '#ff0000']
+    assert sorted(h for h, _ in colors) == ['#0000ff', '#00ff00', '#ff0000']
+    assert abs(sum(share for _, share in colors) - 1) < 1e-6
+
+
+def test_image_palette_sorted_by_prominence(qapp):
+    img = solid('#2040d0', 100, 100, '#e02020', 0.2)
+    colors = analysis.image_palette(analysis.thumbnail_for(
+        QtGui.QPixmap.fromImage(img), QtCore.QRectF(0, 0, 100, 100)), 2)
+    assert analysis.from_hex(colors[0][0])[2] > 180   # the blue first
+    assert colors[0][1] > colors[1][1]
 
 
 def test_dhash_matches_resized_copy(qapp):
@@ -305,14 +314,19 @@ def test_layout_actions_undo(view, action):
     assert [(i.pos(), i.scale()) for i in items] == before
 
 
-def test_generate_palette(view):
-    add_images(view, ['#ff0000', '#0000ff'])
-    with patch('PyQt6.QtWidgets.QInputDialog.getInt', return_value=(2, True)):
-        view.on_action_generate_palette()
-    palettes = [i for i in view.scene.items_for_save()
+def test_view_palette_is_kept_with_the_image(view):
+    a, b = add_images(view, ['#ff0000', '#0000ff'])
+    view.settings.setValue('Items/palette_size', 2)
+    colors = view.rb_palette([a])
+    assert colors[0][0] == '#ff0000'
+    assert a.meta['palette']['colors'] == [list(c) for c in colors]
+    # Shift+P shows the palette in a menu instead of adding an item
+    a.setSelected(True)
+    view.on_action_generate_palette()
+    rows = [r.label for r in view.menu_host.menus[0].rows]
+    assert '#ff0000' in rows and 'copy all hex codes' in rows
+    assert not [i for i in view.scene.items_for_save()
                 if isinstance(i, BeePaletteItem)]
-    assert len(palettes) == 1
-    assert sorted(palettes[0].colors) == ['#0000ff', '#ff0000']
 
 
 def test_select_duplicates_keeps_largest(view):

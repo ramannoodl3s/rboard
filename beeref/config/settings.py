@@ -157,6 +157,20 @@ class BeeSettings(QtCore.QSettings):
             'default': False,
             'cast': lambda x: x in (True, 'true', '1', 1),
         },
+        'Appearance/ui_scale': {
+            # Interface size in percent of 96 dpi; applied at startup
+            'default': 200,
+            'cast': int,
+            'validate': lambda x: 100 <= x <= 300,
+        },
+        'Appearance/font_family': {
+            # Interface font; empty = the design's Helvetica Neue
+            'default': '',
+        },
+        'Appearance/font_file': {
+            # A font file added in settings (copied to the settings folder)
+            'default': '',
+        },
         'Pen/color': {
             'default': '#d24b3c',
             'validate': lambda x: isinstance(x, str) and x.startswith('#'),

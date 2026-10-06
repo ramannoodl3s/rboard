@@ -33,6 +33,7 @@ from beeref.items import BeePixmapItem, BeeTextItem
 from beeref.main_controls import MainControlsMixin
 from beeref.rboard.ui.board_ui import BoardUIMixin
 from beeref.rboard.ui.content_ui import ContentMixin
+from beeref.rboard.ui.links_ui import LinksMixin
 from beeref.rboard.view_mixin import RBoardMixin
 from beeref.scene import BeeGraphicsScene
 from beeref.utils import get_file_extension_from_format, qcolor_to_hex
@@ -46,6 +47,7 @@ class BeeGraphicsView(MainControlsMixin,
                       RBoardMixin,
                       BoardUIMixin,
                       ContentMixin,
+                      LinksMixin,
                       QtWidgets.QGraphicsView,
                       ActionsMixin):
 
@@ -94,7 +96,7 @@ class BeeGraphicsView(MainControlsMixin,
         # Load files given via command line
         if commandline_args.filenames and not self.is_subboard:
             fn = commandline_args.filenames[0]
-            if os.path.splitext(fn)[1] == '.bee':
+            if fileio.is_bee_file(fn):
                 self.open_from_file(fn)
             elif os.path.splitext(fn)[1].lower() == '.pur':
                 self.rb_import_pureref(os.path.normpath(fn))
@@ -431,7 +433,9 @@ class BeeGraphicsView(MainControlsMixin,
         else:
             self.filename = filename
             self.scene.add_queued_items()
-            self.on_action_fit_scene()
+            if not self.rb_restore_view(
+                    getattr(self.scene, 'loaded_board_data', {})):
+                self.on_action_fit_scene()
             self.rb_after_images_added()
 
     def on_action_open_recent_file(self, filename):
@@ -464,8 +468,8 @@ class BeeGraphicsView(MainControlsMixin,
         self.cancel_active_modes()
         filename, f = QtWidgets.QFileDialog.getOpenFileName(
             parent=self,
-            caption='Open file',
-            filter=f'{constants.APPNAME} File (*.bee)')
+            caption='Open board',
+            filter='Boards (*.brd *.bee);;R Board (*.brd);;BeeRef (*.bee)')
         if filename:
             filename = os.path.normpath(filename)
             self.open_from_file(filename)
@@ -484,7 +488,8 @@ class BeeGraphicsView(MainControlsMixin,
 
     def do_save(self, filename, create_new):
         if not fileio.is_bee_file(filename):
-            filename = f'{filename}.bee'
+            filename = f'{filename}.brd'
+        self.scene.board_data = self.rb_board_data()
         self.worker = fileio.ThreadedIO(
             fileio.save_bee, filename, self.scene, create_new=create_new)
         self.worker.finished.connect(self.on_saving_finished)
@@ -499,9 +504,9 @@ class BeeGraphicsView(MainControlsMixin,
         directory = os.path.dirname(self.filename) if self.filename else None
         filename, f = QtWidgets.QFileDialog.getSaveFileName(
             parent=self,
-            caption='Save file',
+            caption='Save board',
             directory=directory,
-            filter=f'{constants.APPNAME} File (*.bee)')
+            filter='R Board (*.brd);;BeeRef, without R Board extras (*.bee)')
         if filename:
             self.do_save(filename, create_new=True)
 
@@ -509,6 +514,20 @@ class BeeGraphicsView(MainControlsMixin,
         self.cancel_active_modes()
         if not self.filename:
             self.on_action_save_as()
+        elif not fileio.is_rboard_file(self.filename):
+            # A BeeRef board is saved as an R Board board next to it, so
+            # nothing R Board adds gets lost; the .bee file stays as it was
+            target = os.path.splitext(self.filename)[0] + '.brd'
+            if os.path.exists(target):
+                answer = QtWidgets.QMessageBox.question(
+                    self, 'Save board',
+                    f'{os.path.basename(target)} already exists. Replace '
+                    'it with this board?')
+                if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+            self.rb_notify(f'saved as {os.path.basename(target)} '
+                           '(R Board format); the .bee file is unchanged')
+            self.do_save(target, create_new=True)
         else:
             self.do_save(self.filename, create_new=False)
 
@@ -738,8 +757,11 @@ class BeeGraphicsView(MainControlsMixin,
             QtCore.QUrl.fromLocalFile(dirname))
 
     def on_selection_changed(self):
-        logger.debug('Currently selected items: %s',
-                     len(self.scene.selectedItems(user_only=True)))
+        try:
+            selected = self.scene.selectedItems(user_only=True)
+        except RuntimeError:
+            return  # the scene is being torn down (window closing)
+        logger.debug('Currently selected items: %s', len(selected))
         self.actiongroup_set_enabled('active_when_selection',
                                      self.scene.has_selection())
         self.actiongroup_set_enabled('active_when_single_image',
@@ -882,6 +904,10 @@ class BeeGraphicsView(MainControlsMixin,
             event.accept()
             return
 
+        if self.rb_link_event(event, 'press'):
+            event.accept()
+            return
+
         if self.active_mode == self.SAMPLE_COLOR_MODE:
             if (event.button() == Qt.MouseButton.LeftButton):
                 color = self.scene.sample_color_at(
@@ -954,6 +980,10 @@ class BeeGraphicsView(MainControlsMixin,
             event.accept()
             return
 
+        if self.rb_link_event(event, 'move'):
+            event.accept()
+            return
+
         if self.mouseMoveEventMainControls(event):
             return
         super().mouseMoveEvent(event)
@@ -972,6 +1002,9 @@ class BeeGraphicsView(MainControlsMixin,
         if self.rb_pen_event(event, 'release'):
             event.accept()
             return
+        if self.rb_link_event(event, 'release'):
+            event.accept()
+            return
         if self.mouseReleaseEventMainControls(event):
             return
         super().mouseReleaseEvent(event)
@@ -986,6 +1019,11 @@ class BeeGraphicsView(MainControlsMixin,
         if (getattr(self, 'pen_active', False)
                 and event.key() == Qt.Key.Key_Escape):
             self.bee_qactions['pen_mode'].setChecked(False)
+            event.accept()
+            return
+        if (getattr(self, 'link_pick', None) is not None
+                and event.key() == Qt.Key.Key_Escape):
+            self.rb_cancel_link_pick()
             event.accept()
             return
         if self.keyPressEventMainControls(event):

@@ -36,16 +36,26 @@ from PyQt6 import QtGui
 from beeref import constants
 from beeref.items import BeePixmapItem, BeeErrorItem
 from .errors import BeeFileIOError, IMG_LOADING_ERROR_MSG
-from .schema import SCHEMA, USER_VERSION, MIGRATIONS, APPLICATION_ID
+from .schema import (
+    SCHEMA, USER_VERSION, MIGRATIONS, APPLICATION_ID, RBOARD_APPLICATION_ID,
+    BOARD_TABLE)
 
 
 logger = logging.getLogger(__name__)
 
 
-def is_bee_file(path):
-    """Check whether the file at the given path is a bee file."""
+BOARD_EXTENSIONS = ('.brd', '.bee')
 
-    return os.path.splitext(path)[1] == '.bee'
+
+def is_bee_file(path):
+    """Check whether the file at the given path is a board file: R Board's
+    own .brd, or BeeRef's .bee."""
+
+    return os.path.splitext(path)[1].lower() in BOARD_EXTENSIONS
+
+
+def is_rboard_file(path):
+    return os.path.splitext(path)[1].lower() == '.brd'
 
 
 def handle_sqlite_errors(func):
@@ -177,7 +187,9 @@ class SQLiteIO:
         return self.cursor.fetchall()
 
     def write_meta(self):
-        self.ex('PRAGMA application_id=%s' % APPLICATION_ID)
+        app_id = (RBOARD_APPLICATION_ID if is_rboard_file(self.filename)
+                  else APPLICATION_ID)
+        self.ex('PRAGMA application_id=%s' % app_id)
         self.ex('PRAGMA user_version=%s' % USER_VERSION)
         self.ex('PRAGMA foreign_keys=ON')
 
@@ -200,6 +212,7 @@ class SQLiteIO:
             ' items.data, null as data '
             'FROM items '
             'WHERE items.type IN ("text", "palette", "stroke")'))
+        self.scene.loaded_board_data = self.read_board_data()
         if self.worker:
             self.worker.begin_processing.emit(len(rows))
 
@@ -260,7 +273,27 @@ class SQLiteIO:
                 self._close_connection()
                 self.write()
 
+    def read_board_data(self):
+        """R Board's board-level data (.brd files), as a dict."""
+        exists = self.fetchone(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='board'")
+        if not exists:
+            return {}
+        return {key: json.loads(value) for key, value in
+                self.fetchall('SELECT key, value FROM board')}
+
+    def write_board_data(self):
+        data = getattr(self.scene, 'board_data', None)
+        if not is_rboard_file(self.filename) or data is None:
+            return
+        self.ex(BOARD_TABLE)
+        self.ex('DELETE FROM board')
+        self.exmany('INSERT INTO board (key, value) VALUES (?, ?)',
+                    [(k, json.dumps(v)) for k, v in data.items()])
+
     def write_data(self):
+        self.write_board_data()
         to_delete = {row[0] for row in self.fetchall('SELECT id from ITEMS')}
         # We don't want to touch existing items that are displayed as errors:
         keep = {item.original_save_id

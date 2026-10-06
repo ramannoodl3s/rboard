@@ -20,6 +20,7 @@ closes.
 
 import itertools
 import logging
+import os
 
 from PyQt6 import QtCore, QtGui
 
@@ -64,6 +65,7 @@ class SubBoard:
         self.layout = None        # cached [(source, x, y, scale, z)]
         self.headers = []         # cached [(text, x, y, scale)]
         self.sections = None      # [(title, sources)] to lay out apart
+        self.rows = None          # [[sources]] for a link tree, top down
         self.window = None
 
     @property
@@ -111,6 +113,27 @@ class SubBoardManager(QtCore.QObject):
                 sources = sources + suggested
         board = SubBoard(label, key, sources, parent)
         board.sections = sections
+        self.boards.append(board)
+        self.show(board)
+        return board
+
+    def open_links(self, anchor, candidates, parent=None):
+        """A sub board with every image linked to `anchor` (directly or
+        through others), laid out as a flowchart."""
+        from beeref.rboard import links
+        key = f'links:{links.uid(anchor)}'
+        members = links.tree(anchor, candidates)
+        for board in self.boards:
+            if board.parent is parent and board.key == key and \
+                    set(map(id, board.sources)) == set(map(id, members)):
+                self.show(board)
+                return board
+        for board in [b for b in self.boards if b.key == key
+                      and b.parent is parent]:
+            self.discard(board)  # the links changed since
+        name = anchor.filename and os.path.basename(anchor.filename)
+        board = SubBoard(f'links · {name or "image"}', key, members, parent)
+        board.rows = links.levels(members)
         self.boards.append(board)
         self.show(board)
         return board
