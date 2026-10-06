@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 include = ["beeref*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.html", "*.png", "*.json"]
+"*" = ["*.html", "*.png", "*.json", "*.npz"]
 
 [project]
 name = "RBoard"

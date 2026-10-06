@@ -109,7 +109,7 @@ they're computed once per image.
 QT_QPA_PLATFORM=offscreen .venv/Scripts/python -m pytest tests
 ```
 
-R Board's own tests are in `tests/rboard/`. Ten upstream tests fail
+R Board's own tests are in `tests/rboard/`. Nine upstream tests fail
 headless on Windows (window-manager and permission tests); they fail the
 same way on unmodified BeeRef.
 
