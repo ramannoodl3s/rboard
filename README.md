@@ -1,11 +1,25 @@
 # R Board
 
-A moodboard app for Windows: a fork of the reference image viewer
-[BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu, with colour
-sorting, palettes, text reading, PureRef import, sub boards, links,
-notes, tags and a pen. Everything BeeRef does still works.
-New code lives in `beeref/rboard/`; changes to BeeRef's own files are small
-hooks (menus, item metadata, palette loading).
+**[Download the latest version](https://github.com/ramannoodl3s/rboard/releases/latest)** (Windows, portable zip)
+
+What it does that PureRef doesn't:
+
+- **Auto tags** for every image: colour, mood, style, what kind of image it is, what's in it
+- **Your own tags**, with suggestions for images that fit them
+- **Sub boards**: pull images by tag (include some, exclude others) into a separate board without touching the main one
+- **Split the window like Blender** to see boards side by side
+- **Colour study**: flatten an image into 8 regions by value or colour, with hex codes
+- **Sort by colour** with a threshold to pick which images count
+- **Group by content**: cluster the board by what the images show
+- **Search by meaning**: find "people on a sofa" without tagging anything
+- **Link images** with arrows and open a linked chain as a flowchart
+- **Notes** on images, and a **pen** for drawing on them
+- **Text in images**: read it, copy it, search it
+- **Find by colour** and **select duplicates**
+- **Export a selection** as one image, laid out as on the board
+- Opens **PureRef boards** (.pur) and BeeRef boards (.bee)
+
+Based on [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu.
 
 ## Run from source
 
