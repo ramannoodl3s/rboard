@@ -1,0 +1,23 @@
+R Board {version} - a moodboard app for Windows 10 and 11
+
+Run "R Board.exe". Nothing needs installing; keep this whole folder
+together (the _internal folder is part of the app).
+
+The first time, Windows may say "Windows protected your PC" because the
+app isn't signed: click "More info", then "Run anyway".
+
+Getting started
+- Drag images, or a whole folder of images, onto the window.
+- The bar at the bottom right has everything; hover its icons.
+- Right-click an image for its tags, colour study, links and notes.
+- Drag from an area's corner to split the window (like Blender) and show
+  a sub board next to the main board.
+- Save boards as .brd files (Ctrl+S). Shortcuts follow PureRef's.
+
+Tags like kind, mood and style come from a small image model that runs on
+your computer. R Board asks before downloading it (about 90 MB, once).
+
+New versions: https://github.com/ramannoodl3s/rboard/releases/latest
+
+R Board is free software (GPL v3, see LICENSE.txt), based on BeeRef by
+Rebecca Breu. Source code: https://github.com/ramannoodl3s/rboard

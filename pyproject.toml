@@ -10,7 +10,7 @@ include = ["beeref*"]
 
 [project]
 name = "RBoard"
-version = "0.1.0"
+version = "0.2.0"
 description = "A moodboard app, based on the BeeRef reference image viewer"
 readme = "README.md"
 license = {file = "LICENSE"}
