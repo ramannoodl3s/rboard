@@ -1,5 +1,6 @@
 # Pushing a version tag (e.g. v0.3.0) builds the portable zip and the AI
-# features plugin on Windows and publishes them as a GitHub release.
+# features plugin on Windows and publishes them as a GitHub release. Use an
+# annotated tag: its message becomes the patch notes.
 name: Release
 
 on:
@@ -32,35 +33,18 @@ jobs:
           $zip = .\packaging\build.ps1 -Python python
           "zip=$zip" >> $env:GITHUB_OUTPUT
 
+      - name: Release notes
+        shell: bash
+        run: |
+          # The tag's message (git tag -a v1.2.3 -m "...") goes on top
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          echo >> notes.md
+          cat .github/release-body.md >> notes.md
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.zip
           generate_release_notes: true
-          body: |
-            **Download:** `R-Board-…-portable.zip` below, unzip it anywhere and run `R Board.exe`. Nothing needs installing.
-
-            Windows may say "Windows protected your PC" (the app isn't signed). To skip that, right-click the zip → **Properties** → tick **Unblock** → **OK** before unzipping. Or click **More info**, then **Run anyway**.
-
-            **AI features** (kind, mood and style tags, search by meaning, group by content) are a one-time install from inside R Board: **Plugins → Get AI Features**. You don't need to download `R-Board-AI-….zip` yourself; R Board fetches it.
-
-            <details><summary>Run from source</summary>
-
-            Needs Python 3.11 on Windows 10 or 11.
-
-            ```
-            python -m venv .venv
-            .venv\Scripts\pip install -e .
-            .venv\Scripts\rboard.exe
-            ```
-
-            Build the portable zip yourself:
-
-            ```
-            .venv\Scripts\pip install -r requirements\build.txt
-            powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Python .venv\Scripts\python.exe
-            ```
-
-            New release: set `VERSION` in `beeref/constants.py` and `pyproject.toml`, commit, then `git tag v<version>` and `git push origin v<version>`.
-
-            </details>
+          body_path: notes.md
