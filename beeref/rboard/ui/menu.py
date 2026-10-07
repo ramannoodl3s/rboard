@@ -23,7 +23,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 from beeref.rboard.ui import icons
-from beeref.rboard.ui.theme import px, tm, ui_font
+from beeref.rboard.ui.theme import is_sub, px, surface, tm, ui_font
 
 
 ROW_H = 28
@@ -128,7 +128,7 @@ class MenuRow(QtWidgets.QWidget):
         rect = QtCore.QRectF(self.rect()).adjusted(4, 0, -4, 0)
         if self.hovered and self.enabled:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(t.color('hover'))
+            p.setBrush(surface('hover', self.menu.card.tinted))
             p.drawRoundedRect(rect, px('radius-sm'), px('radius-sm'))
         if not self.enabled:
             p.setOpacity(0.45)
@@ -238,6 +238,7 @@ class Card(QtWidgets.QFrame):
         super().__init__(parent)
         self.radius = radius
         self.fill = fill
+        self.tinted = False   # a sub board's
 
     def update_theme(self):
         self.update()
@@ -247,7 +248,7 @@ class Card(QtWidgets.QFrame):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         p.setPen(QtGui.QPen(t.color('divider'), 1))
-        p.setBrush(t.color(self.fill))
+        p.setBrush(surface(self.fill, self.tinted))
         r = px(self.radius)
         p.drawRoundedRect(
             QtCore.QRectF(self.rect()).adjusted(.5, .5, -.5, -.5),
@@ -275,6 +276,7 @@ class OverlayMenu(QtWidgets.QWidget):
         self.on_activate = on_activate
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.card = Card(self)
+        self.card.tinted = is_sub(host)
         self.outer = QtWidgets.QVBoxLayout(self.card)
         self.outer.setContentsMargins(0, 4, 0, 4)
         self.outer.setSpacing(0)
@@ -310,6 +312,8 @@ class OverlayMenu(QtWidgets.QWidget):
         self.body.adjustSize()
         height = self.body.sizeHint().height() + 8
         limit = max(160, self.host.height() - 16)
+        if getattr(self, 'max_height', None):
+            limit = min(limit, self.max_height)
         if height > limit and self.scroll is None:
             self.scroll = QtWidgets.QScrollArea()
             self.scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
@@ -406,6 +410,13 @@ class OverlayMenu(QtWidgets.QWidget):
         align='above':  right edge at anchor.x(), bottom at anchor.y().
         """
         host = self.host.rect()
+        if align == 'above':
+            # Taller than the room above the bar: scroll rather than
+            # slide down over the bar
+            room = anchor.y() - host.top() - 8
+            if self.card.height() > room:
+                self.max_height = max(120, room)
+                self.relayout()
         w, h = self.width(), self.height()
         if align == 'above':
             x = anchor.x() - w + SHADOW

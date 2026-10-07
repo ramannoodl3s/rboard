@@ -46,6 +46,36 @@ class SubBoardView(BeeGraphicsView):
             if action_id in getattr(self, 'bee_qactions', {}):
                 self.bee_qactions[action_id].setEnabled(False)
 
+    # -- window-level toggles --
+    # A docked board sits in the main window, so its menu bar, title bar,
+    # full screen and always-on-top toggles are the main board's. Running
+    # its own would swap in its menu bar and recreate the main window.
+
+    def _main_toggle(self, action_id, checked):
+        qaction = self.manager.main_view.bee_qactions.get(action_id)
+        if qaction is not None and qaction.isChecked() != checked:
+            qaction.setChecked(checked)
+
+    def on_action_show_menubar(self, checked):
+        if self.docked is not None:
+            return self._main_toggle('show_menubar', checked)
+        super().on_action_show_menubar(checked)
+
+    def on_action_show_titlebar(self, checked):
+        if self.docked is not None:
+            return self._main_toggle('show_titlebar', checked)
+        super().on_action_show_titlebar(checked)
+
+    def on_action_fullscreen(self, checked):
+        if self.docked is not None:
+            return self._main_toggle('fullscreen', checked)
+        super().on_action_fullscreen(checked)
+
+    def on_action_always_on_top(self, checked):
+        if self.docked is not None:
+            return self._main_toggle('always_on_top', checked)
+        super().on_action_always_on_top(checked)
+
     def update_window_title(self):
         board = getattr(self, 'board', None)
         if board is None or callable(self.scene):
@@ -103,6 +133,13 @@ class BoardContent:
 
     def refresh_description(self):
         self.description.refresh(self.board.description)
+        self.tags.refresh()
+
+    def repopulate(self):
+        """Fill the board again (its images changed)."""
+        self.view.clear_scene()
+        self.populate()
+        self.refresh_description()
 
     """Filling a sub board's view with linked copies, and remembering
     its layout. Shared by sub boards in areas and in their own windows."""
@@ -318,6 +355,172 @@ class DescriptionStrip(QtWidgets.QLabel):
         edit_description(self.content.view, self.content.board)
 
 
+class TagField(QtWidgets.QLineEdit):
+    """Typing tags to add (commas between); Enter adds them, Esc or
+    clicking away with nothing typed cancels."""
+
+    def __init__(self, strip, column, names):
+        super().__init__()
+        self.strip = strip
+        self.column = column
+        self.done = False
+        self.setPlaceholderText('tag, or a word…')
+        self.setFixedWidth(180)
+        completer = QtWidgets.QCompleter(sorted(names), self)
+        completer.setCaseSensitivity(
+            QtCore.Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(QtCore.Qt.MatchFlag.MatchContains)
+        self.setCompleter(completer)
+        self.returnPressed.connect(self.commit)
+
+    def commit(self):
+        if self.done:
+            return
+        self.done = True
+        from beeref.rboard.ui.subboard_dialog import split_terms
+        terms = split_terms(self.text())
+        QtCore.QTimer.singleShot(
+            0, lambda: self.strip.add_terms(self.column, terms))
+
+    def cancel(self):
+        if not self.done:
+            self.done = True
+            QtCore.QTimer.singleShot(0, self.strip.stop_adding)
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key.Key_Escape:
+            self.cancel()
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        if self.completer().popup().isVisible():
+            return
+        if self.text().strip():
+            self.commit()
+        else:
+            self.cancel()
+
+
+class TagsStrip(QtWidgets.QWidget):
+    """A sub board's tags above it, in an include column and a leave-out
+    column: a tag's × takes it off, + adds one, and the board fills again
+    with the images that match."""
+
+    COLUMNS = (('include', 'include'), ('exclude', 'leave out'))
+
+    def __init__(self, content):
+        super().__init__()
+        self.content = content
+        self.adding = None   # the column a tag is being typed into
+        self.row = QtWidgets.QHBoxLayout(self)
+        self.row.setContentsMargins(12, 5, 12, 5)
+        self.row.setSpacing(6)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground)
+
+    def rule(self):
+        from beeref.rboard.subboards import board_rule
+        return board_rule(self.content.board)
+
+    def refresh(self):
+        from beeref.rboard.subboards import term_label
+        from beeref.rboard.ui.theme import surface, tm
+        while self.row.count():
+            child = self.row.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        rule = self.rule()
+        self.setVisible(rule is not None)
+        if rule is None:
+            return
+        t = tm()
+        self.setStyleSheet(
+            f'TagsStrip {{ background: {surface("surface", True).name()};'
+            f' border-bottom: 1px solid {t.hex("divider")}; }}'
+            f' QLabel {{ color: {t.hex("ink-muted")}; }}'
+            f' QToolButton {{ color: {t.hex("ink")}; border: none;'
+            ' border-radius: 10px; padding: 1px 8px; }'
+            f' QToolButton:hover {{ background: {t.hex("hover")}; }}'
+            ' QToolButton[chip="true"] {'
+            f' background: {t.hex("accent-soft")}; }}')
+        for i, (column, caption) in enumerate(self.COLUMNS):
+            if i:
+                self.row.addSpacing(28)
+            self.row.addWidget(QtWidgets.QLabel(caption))
+            if column == 'include' and len(rule['include']) > 1:
+                mode = QtWidgets.QToolButton()
+                mode.setText('all of' if rule.get('mode', 'all') == 'all'
+                             else 'any of')
+                mode.setToolTip('images with all of these tags, or with any')
+                mode.clicked.connect(self.toggle_mode)
+                self.row.addWidget(mode)
+            for term in rule[column]:
+                chip = QtWidgets.QToolButton()
+                chip.setProperty('chip', True)
+                chip.setText(f'{term_label(term)}  ×')
+                chip.setToolTip('take this tag off')
+                chip.clicked.connect(
+                    lambda _=False, c=column, x=term: self.remove(c, x))
+                self.row.addWidget(chip)
+            if self.adding == column:
+                field = TagField(self, column, self.names())
+                self.row.addWidget(field)
+                QtCore.QTimer.singleShot(0, field.setFocus)
+            else:
+                plus = QtWidgets.QToolButton()
+                plus.setText('+')
+                plus.setToolTip('add a tag' if column == 'include'
+                                else 'leave out a tag')
+                plus.clicked.connect(
+                    lambda _=False, c=column: self.start_adding(c))
+                self.row.addWidget(plus)
+        self.row.addStretch()
+
+    def names(self):
+        from beeref.rboard.subboards import term_index
+        images = self.content.manager.candidates(self.content.board)
+        return {n for n in term_index(images) if ':' not in n}
+
+    def start_adding(self, column):
+        self.adding = column
+        self.refresh()
+
+    def stop_adding(self):
+        self.adding = None
+        self.refresh()
+
+    def add_terms(self, column, terms):
+        self.adding = None
+        rule = self.rule()
+        have = {x.lower() for x in rule[column]}
+        fresh = [t for t in terms if t.lower() not in have]
+        if not fresh:
+            self.refresh()
+            return
+        self.change(dict(rule, **{column: rule[column] + fresh}))
+
+    def remove(self, column, term):
+        rule = self.rule()
+        self.change(dict(rule, **{column: [t for t in rule[column]
+                                           if t != term]}))
+
+    def toggle_mode(self):
+        rule = self.rule()
+        self.change(dict(rule, mode='any' if rule.get('mode', 'all') == 'all'
+                         else 'all'))
+
+    def change(self, rule):
+        from beeref.rboard.subboards import change_rule
+        manager = self.content.manager
+        main = manager.main_view
+        if main.rb_analyze(manager.candidates(self.content.board)) is None:
+            self.refresh()
+            return
+        if not change_rule(manager, self.content.board, rule):
+            main.rb_notify('no images match these tags')
+
+
 def edit_description(view, board):
     text, ok = QtWidgets.QInputDialog.getMultiLineText(
         view, 'description',
@@ -347,6 +550,8 @@ class SubBoardWindow(QtWidgets.QMainWindow, BoardContent):
         layout.setSpacing(0)
         self.description = DescriptionStrip(self)
         layout.addWidget(self.description)
+        self.tags = TagsStrip(self)
+        layout.addWidget(self.tags)
         layout.addWidget(self.view, 1)
         self.setCentralWidget(central)
         self.refresh_description()
@@ -394,6 +599,8 @@ class DockedBoard(QtWidgets.QWidget, BoardContent):
         layout.setSpacing(0)
         self.description = DescriptionStrip(self)
         layout.addWidget(self.description)
+        self.tags = TagsStrip(self)
+        layout.addWidget(self.tags)
         layout.addWidget(self.view, 1)
         self.refresh_description()
         board.window = self

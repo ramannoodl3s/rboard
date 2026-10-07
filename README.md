@@ -1,23 +1,43 @@
 # R Board
 
-**[Download the latest version](https://github.com/ramannoodl3s/rboard/releases/latest)** (Windows, portable zip)
+A reference board for artists. Drop in your images, arrange them however you like, and let R Board help you sort, search and study them.
 
-What it does that PureRef doesn't:
+**[Download R Board for Windows](https://github.com/ramannoodl3s/rboard/releases/latest)**. Unzip it anywhere and open `R Board.exe`; nothing needs installing. If Windows says it "protected your PC", click **More info** → **Run anyway** (the app just isn't signed).
 
-- **Auto tags** for every image: colour, mood, style, what kind of image it is, what's in it
-- **Your own tags**, with suggestions for images that fit them
-- **Sub boards**: pull images by tag (include some, exclude others) into a separate board without touching the main one
-- **Split the window like Blender** to see boards side by side
-- **Colour study**: flatten an image into 8 regions by value or colour, with hex codes
-- **Sort by colour** with a threshold to pick which images count
-- **Group by content**: cluster the board by what the images show
-- **Search by meaning**: find "people on a sofa" without tagging anything
-- **Link images** with arrows and open a linked chain as a flowchart
-- **Notes** on images, and a **pen** for drawing on them
-- **Text in images**: read it, copy it, search it
-- **Find by colour** and **select duplicates**
-- **Export a selection** as one image, laid out as on the board
-- Opens **PureRef boards** (.pur) and BeeRef boards (.bee)
-- **Plugins**: the AI features (tags, search by meaning, group by content) are a one-time install from inside the app
+## What you can do
 
-Based on [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu.
+**Collect**
+- Drag images, folders or links onto the board, or paste them
+- Open your PureRef (.pur) and BeeRef (.bee) boards as they are
+- Big boards stay quick: images load at the size you're viewing them
+
+**Organise**
+- Every image gets tags for its colours and shapes; add your own tags too
+- Make **sub boards**: pick tags to include and leave out, and the matching images gather on their own board. Your main board stays as it was
+- Show boards side by side by splitting the window, like in Blender
+- Give a sub board a description with clickable links (handy for crediting an artist)
+- Link images with arrows and open a chain of them as a flowchart
+
+**Study**
+- **Colour study**: flatten an image into a few areas of value or colour, with hex codes
+- **Sort by colour**: by brightness, by hue, or by how much of a colour (say "dark blue") is in each image
+- Pick colours, see an image's colour spread, find images by colour
+- Draw on images with the pen, and leave notes on them
+
+**Find**
+- Copy or search the text inside images
+- Spot duplicates
+- Export a selection as one image, laid out as it is on the board
+
+## AI features (optional)
+
+A free one-time add-on, installed from inside the app (**settings → plugins**). It adds:
+- tags for what an image shows, its mood and its style
+- search by meaning: type "people on a sofa" and find them, no tagging needed
+- group a board by what the images show
+
+Everything runs on your own computer.
+
+## Credits
+
+R Board is built on [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu, and is free software under the GPL-3.0 licence.

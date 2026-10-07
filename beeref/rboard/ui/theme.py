@@ -396,6 +396,23 @@ def tm():
     return ThemeManager.instance()
 
 
+SUB_TINT = 0.3
+
+
+def surface(name, sub=False):
+    """A surface colour for a board's bars and menus. Sub boards get
+    theirs tinted towards the accent, so it's clear which board they
+    act on."""
+    t = tm()
+    if not sub:
+        return t.color(name)
+    return QtGui.QColor(mix(t.hex(name), t.hex('accent'), SUB_TINT))
+
+
+def is_sub(host):
+    return bool(getattr(host, 'is_subboard', False))
+
+
 def stylesheet(c):
     """Qt stylesheet for standard widgets (dialogs, fields, buttons)."""
     r_sm, r_md, r_lg = px('radius-sm'), px('radius-md'), px('radius-lg')

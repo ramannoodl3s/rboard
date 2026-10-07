@@ -352,6 +352,13 @@ class SubBoardManager(QtCore.QObject):
         walk(None)
         return out
 
+    def candidates(self, board):
+        """The images a board picks from: its parent board's, or the
+        main board's."""
+        if board.parent is None:
+            return self.main_view.rb_images()
+        return self.live_sources(board.parent)
+
     def refresh_views(self):
         """Repaint every open sub board (after linked data changed)."""
         for board in self.boards:
@@ -372,6 +379,62 @@ def describe(manager, board, text):
 
     manager.main_view.undo_stack.push(ManagerChange(
         'Describe sub board', lambda: apply(text), lambda: apply(old)))
+
+
+def board_rule(board):
+    """The tags a board includes and leaves out: its query, or the one
+    tag (colour, shape, folder…) it was opened for. None for lists, link
+    trees and similar images."""
+    if board.rule is not None:
+        return board.rule
+    if ':' in board.key and not board.key.startswith(
+            ('links:', 'list:', 'query:')):
+        return {'include': [board.key], 'exclude': [], 'mode': 'all'}
+    return None
+
+
+def term_label(term):
+    """'color:orange' -> 'orange'; plain tags stay as they are."""
+    return term.split(':', 1)[1] if ':' in term else term
+
+
+def rule_title(rule):
+    joiner = ' + ' if rule.get('mode', 'all') == 'all' else ' or '
+    title = joiner.join(map(term_label, rule['include'])) or 'everything'
+    if rule['exclude']:
+        title += ' − ' + ', '.join(map(term_label, rule['exclude']))
+    return title
+
+
+RULE_FIELDS = ('rule', 'key', 'title', 'sources', 'sections', 'layout',
+               'headers')
+
+
+def change_rule(manager, board, rule):
+    """Give a board new tags to include and leave out: it fills again
+    with the images matching them (undoable). A board named after its
+    tags is renamed to match."""
+    if board.window is not None:
+        board.layout = board.window.layout_snapshot()
+        board.headers = board.window.header_snapshot()
+    before = {f: getattr(board, f) for f in RULE_FIELDS}
+    old = board_rule(board)
+    after = dict(before, rule=rule, key=f'query:{board.id}',
+                 sources=query_matches(rule, manager.candidates(board)),
+                 sections=None, layout=None, headers=[])
+    if old is not None and board.title in (rule_title(old), board.key):
+        after['title'] = rule_title(rule)
+
+    def apply(state):
+        for field, value in state.items():
+            setattr(board, field, value)
+        if board.window is not None:
+            board.window.repopulate()
+        manager.changed.emit()
+
+    manager.main_view.undo_stack.push(ManagerChange(
+        'Change sub board tags', lambda: apply(after), lambda: apply(before)))
+    return len(after['sources'])
 
 
 class ManagerChange(QtGui.QUndoCommand):

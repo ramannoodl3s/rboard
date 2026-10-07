@@ -18,6 +18,7 @@ from functools import partial
 import os.path
 
 from PyQt6 import QtGui, QtWidgets
+from PyQt6.QtCore import Qt
 
 from .actions import Action, actions
 from .menu_structure import menu_structure, MENU_SEPARATOR
@@ -80,6 +81,10 @@ class ActionsMixin:
             shortcuts = action.get_shortcuts()
             if shortcuts:
                 qaction.setShortcuts(shortcuts)
+            # R Board: several boards share a window (areas); each one's
+            # shortcuts act only while it has focus, else they clash
+            qaction.setShortcutContext(
+                Qt.ShortcutContext.WidgetWithChildrenShortcut)
             if action.checkable:
                 self._init_action_checkable(action, qaction)
             else:

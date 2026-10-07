@@ -17,7 +17,7 @@ from PyQt6.QtCore import Qt
 
 from beeref.rboard.ui import icons
 from beeref.rboard.ui.menu import SHADOW, Card, OverlayMenu, paint_shadow
-from beeref.rboard.ui.theme import px, tm
+from beeref.rboard.ui.theme import is_sub, px, surface, tm
 
 
 BUTTON = 28
@@ -69,7 +69,7 @@ class BarButton(QtWidgets.QAbstractButton):
             color = t.hex('accent')
         elif self.hovered and enabled:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(t.color('hover'))
+            p.setBrush(surface('hover', self.bar.card.tinted))
             p.drawRoundedRect(rect, px('radius-sm'), px('radius-sm'))
             color = t.hex('ink')
         else:
@@ -108,6 +108,7 @@ class HomeBar(QtWidgets.QWidget):
         self.menu = None
         self.pinned = 0  # >0 keeps the bar visible (e.g. while drawing)
         self.card = Card(self, radius='radius-lg')
+        self.card.tinted = is_sub(view)
         layout = QtWidgets.QHBoxLayout(self.card)
         layout.setContentsMargins(GAP, GAP, GAP, GAP)
         layout.setSpacing(GAP)
@@ -343,7 +344,8 @@ class StatusPill(QtWidgets.QLabel):
     def update_theme(self):
         t = tm()
         self.setStyleSheet(
-            f'background:{t.hex("surface-raised")};color:{t.hex("ink-muted")};'
+            f'background:{surface("surface-raised", is_sub(self.view)).name()};'
+            f'color:{t.hex("ink-muted")};'
             'border-radius:12px;padding:0 10px;font-size:11px;')
         self.setFixedHeight(24)
 

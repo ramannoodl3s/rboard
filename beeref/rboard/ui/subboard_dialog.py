@@ -122,12 +122,7 @@ class SubBoardDialog(QtWidgets.QDialog):
     def title(self):
         if self.name.text().strip():
             return self.name.text().strip()
-        rule = self.rule()
-        joiner = ' + ' if rule['mode'] == 'all' else ' or '
-        title = joiner.join(rule['include']) or 'everything'
-        if rule['exclude']:
-            title += ' − ' + ', '.join(rule['exclude'])
-        return title
+        return subboards.rule_title(self.rule())
 
     def matches(self):
         return subboards.query_matches(self.rule(), self.images,

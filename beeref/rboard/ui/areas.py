@@ -20,6 +20,8 @@ the menu at the left of its header.
 - Swapping contents: Ctrl-drag from a corner to another area.
 - New window: Shift-drag from a corner (sub boards only).
 - Esc or right-click before releasing cancels.
+- Closing: the × at the left of a header (sub boards; the main board
+  always has an area). The areas along one whole edge grow over it.
 - Area options (right-click a border): Vertical Split, Horizontal Split
   (Tab switches), Join Left/Right/Up/Down, Swap Areas.
 - View > Area: Toggle Maximize Area (Ctrl+Space), Focus Mode
@@ -34,7 +36,7 @@ from PyQt6.QtCore import Qt
 
 from beeref.rboard.ui import icons
 from beeref.rboard.ui.menu import ROW_H, MenuHost, OverlayMenu
-from beeref.rboard.ui.theme import px, tm, ui_font
+from beeref.rboard.ui.theme import px, surface, tm, ui_font
 
 GAP = 4            # px between areas
 CORNER = 14        # px, corner action zone
@@ -42,6 +44,10 @@ MIN_SIZE = 140     # px, smallest an area can get
 DRAG_START = 8     # px the pointer moves before a corner gesture starts
 EPS = 1e-6
 SNAPS = (1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4)
+# side: (this area's edge, the neighbour's facing edge, span start, end)
+# as indexes into rect_ [x0, y0, x1, y1]
+SIDES = {'left': (0, 2, 1, 3), 'right': (2, 0, 1, 3),
+         'up': (1, 3, 0, 2), 'down': (3, 1, 0, 2)}
 
 
 def near(a, b):
@@ -137,10 +143,20 @@ class AreaHeader(QtWidgets.QWidget):
         self.hovered = None
         self.setMouseTracking(True)
 
+    def close_rect(self):
+        """The × at the far left; the main board always keeps an area."""
+        if self.area.is_main() or len(self.area.screen.areas) < 2:
+            return QtCore.QRectF()
+        side = self.height() - 6
+        # clear of the corner zone, whose drags split and join
+        return QtCore.QRectF(CORNER + 2, 3, side, side)
+
     def board_rect(self):
         fm = QtGui.QFontMetrics(ui_font(12))
         w = fm.horizontalAdvance(self.area.title()) + 52
-        return QtCore.QRectF(6, 3, min(w, self.width() - 12),
+        close = self.close_rect()
+        left = close.right() + 4 if not close.isNull() else 6
+        return QtCore.QRectF(left, 3, min(w, self.width() - left - 6),
                              self.height() - 6)
 
     def back_rect(self):
@@ -151,8 +167,10 @@ class AreaHeader(QtWidgets.QWidget):
         return QtCore.QRectF(self.width() - w - 6, 3, w, self.height() - 6)
 
     def mouseMoveEvent(self, e):
-        hit = ('board' if self.board_rect().contains(e.position()) else
-               'back' if self.back_rect().contains(e.position()) else None)
+        pos = e.position()
+        hit = ('close' if self.close_rect().contains(pos) else
+               'board' if self.board_rect().contains(pos) else
+               'back' if self.back_rect().contains(pos) else None)
         if hit != self.hovered:
             self.hovered = hit
             self.update()
@@ -165,7 +183,9 @@ class AreaHeader(QtWidgets.QWidget):
         if e.button() == Qt.MouseButton.RightButton:
             self.area.screen.area_menu(self.area, e.globalPosition())
             return
-        if self.back_rect().contains(e.position()):
+        if self.close_rect().contains(e.position()):
+            self.area.screen.close_area(self.area)
+        elif self.back_rect().contains(e.position()):
             self.area.screen.toggle_maximize(self.area)
         elif self.board_rect().contains(e.position()):
             self.area.screen.board_menu(self.area)
@@ -174,12 +194,22 @@ class AreaHeader(QtWidgets.QWidget):
         t = tm()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), t.color('surface'))
+        sub = hasattr(self.area.content, 'board')
+        p.fillRect(self.rect(), surface('surface', sub))
         p.setFont(ui_font(12))
+        close = self.close_rect()
+        if not close.isNull():
+            if self.hovered == 'close':
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(surface('hover', sub))
+                p.drawRoundedRect(close, px('radius-sm'), px('radius-sm'))
+            icons.draw(p, 'close', t.hex('ink' if self.hovered == 'close'
+                                         else 'ink-muted'),
+                       close.adjusted(4, 4, -4, -4))
         rect = self.board_rect()
         if self.hovered == 'board':
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(t.color('hover'))
+            p.setBrush(surface('hover', sub))
             p.drawRoundedRect(rect, px('radius-sm'), px('radius-sm'))
         icon = ('image' if self.area.is_main() else
                 'layers' if self.area.view() else 'plus')
@@ -264,13 +294,19 @@ class EmptyArea(QtWidgets.QWidget):
         self.area = area
         layout = QtWidgets.QVBoxLayout(self)
         layout.addStretch()
-        button = QtWidgets.QPushButton('choose a board for this area')
-        button.clicked.connect(lambda: area.screen.board_menu(area))
+        button = QtWidgets.QPushButton('new sub board…')
+        button.setProperty('primary', True)
+        button.clicked.connect(lambda: area.screen.new_board_in(area))
         row = QtWidgets.QHBoxLayout()
         row.addStretch()
         row.addWidget(button)
         row.addStretch()
         layout.addLayout(row)
+        hint = QtWidgets.QLabel('or pick an existing board from the menu '
+                                'at the top')
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet(f'color: {tm().hex("ink-muted")};')
+        layout.addWidget(hint)
         layout.addStretch()
 
     def paintEvent(self, e):
@@ -321,6 +357,7 @@ class Screen(QtWidgets.QWidget):
         self.border = None         # resizing: (axis, edges, start)
         self.gesture = None        # corner drag state
         self.split_mode = None     # interactive split from the area menu
+        self.target = None         # the empty area a new board goes in
         self.setMouseTracking(True)
         self.overlay = Overlay(self)
         self.overlay.hide()
@@ -364,6 +401,7 @@ class Screen(QtWidgets.QWidget):
                 area.setGeometry(self.rect() if self.maximized
                                  else area.pixel_rect())
                 area.layout_children()
+                area.header.update()   # the × shows with 2+ areas
         self.overlay.setGeometry(self.rect())
         self.overlay.raise_()
 
@@ -685,6 +723,7 @@ class Screen(QtWidgets.QWidget):
         a.content = b.content = None
         a.set_content(cb)
         b.set_content(ca)
+        self.ensure_focus()
         self.changed.emit()
 
     def replace(self, source, target):
@@ -701,22 +740,50 @@ class Screen(QtWidgets.QWidget):
         source.set_content(EmptyArea(source))
         self.close_area(source)
 
+    def fillers(self, area, side):
+        """The areas lining one whole edge of `area` from outside, none
+        sticking out past it, so together they can grow over it."""
+        mine, theirs, s0, s1 = SIDES[side]
+        r = area.rect_
+        found = sorted(
+            (a for a in self.areas if a is not area
+             and near(a.rect_[theirs], r[mine])
+             and a.rect_[s0] < r[s1] - EPS and a.rect_[s1] > r[s0] + EPS),
+            key=lambda a: a.rect_[s0])
+        at = r[s0]
+        for a in found:
+            if not near(a.rect_[s0], at):
+                return None
+            at = a.rect_[s1]
+        return found if found and near(at, r[s1]) else None
+
     def close_area(self, area):
-        """Close an area by joining it into a neighbour."""
-        if len(self.areas) == 1:
+        """Close an area; the areas along one of its edges grow over it
+        (one whole neighbour if there is one, as in Blender)."""
+        if len(self.areas) == 1 or area.is_main():
+            return   # the main board always keeps its area
+        options = [(side, self.fillers(area, side))
+                   for side in ('left', 'right', 'up', 'down')]
+        options = [(side, group) for side, group in options if group]
+        if not options:
+            self.notify("this area can't close here: drag its border first")
             return
-        if area.is_main():
-            other = next(a for a in self.areas if a is not area)
-            self.swap(area, other)
-            area = other
-        for side in ('left', 'right', 'up', 'down'):
-            other = self.neighbour(area, side)
-            if other is not None:
-                self.join(other, area)
-                return
-        # No full-edge neighbour: leave it, but empty
-        self.close_content(area)
-        area.set_content(EmptyArea(area))
+        side, group = min(options, key=lambda o: len(o[1]))
+        theirs = SIDES[side][1]
+        for other in group:
+            other.rect_[theirs] = area.rect_[theirs]
+        self.remove_area(area)
+        self.relayout()
+        self.ensure_focus()
+        self.changed.emit()
+
+    def ensure_focus(self):
+        """Shortcuts act on the focused board: if focus was lost with a
+        closed area, give it to the main board."""
+        focus = QtWidgets.QApplication.focusWidget()
+        if focus is None or not focus.isVisible()                 or not self.isAncestorOf(focus):
+            if self.window().isActiveWindow() or focus is None:
+                self.main_view.setFocus()
 
     def to_window(self, area):
         """Duplicate Area into New Window: a sub board moves to a window
@@ -772,6 +839,9 @@ class Screen(QtWidgets.QWidget):
             return area
         empty = next((a for a in self.areas
                       if isinstance(a.content, EmptyArea)), None)
+        if self.target in self.areas and \
+                isinstance(self.target.content, EmptyArea):
+            empty = self.target
         if empty is None:
             base = near_area or self.main_area()
             rect = base.pixel_rect()
@@ -789,6 +859,14 @@ class Screen(QtWidgets.QWidget):
             self.toggle_maximize()
         self.changed.emit()
         return empty
+
+    def new_board_in(self, area):
+        """The new sub board dialog, for an empty area."""
+        self.target = area
+        try:
+            self.main_view.on_action_new_subboard()
+        finally:
+            self.target = None
 
     def main_area(self):
         return next(a for a in self.areas if a.is_main())
@@ -868,7 +946,8 @@ class Screen(QtWidgets.QWidget):
              lambda: self.to_window(area),
              {'enabled': hasattr(area.content, 'board')}),
             ('item', 'close area', lambda: self.close_area(area),
-             {'enabled': len(self.areas) > 1}),
+             {'enabled': len(self.areas) > 1 and not area.is_main(),
+              'hint': 'main board stays' if area.is_main() else ''}),
         ]
 
     def border_menu(self, axis, c, at, pos):
@@ -912,7 +991,8 @@ class Screen(QtWidgets.QWidget):
     def start_split(self, area, axis):
         """Show a split line that follows the pointer; click to split the
         area under it, Tab switches direction, Esc cancels."""
-        self.split_mode = {'axis': axis}
+        self.split_mode = {'axis': axis,
+                           'focus': QtWidgets.QApplication.focusWidget()}
         self.setFocus()
         self.grabMouse()
         self.grabKeyboard()
@@ -945,8 +1025,15 @@ class Screen(QtWidgets.QWidget):
     def release_split_grab(self):
         self.releaseMouse()
         self.releaseKeyboard()
+        focus = self.split_mode.get('focus') if self.split_mode else None
         self.split_mode = None
         self.overlay.clear()
+        if focus is not None:
+            try:
+                focus.setFocus()
+            except RuntimeError:   # deleted meanwhile
+                pass
+        self.ensure_focus()
 
     def cancel_gesture(self):
         if self.split_mode:

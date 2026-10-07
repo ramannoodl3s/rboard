@@ -364,8 +364,12 @@ class BoardUIMixin:
                     'menu': self.rb_menu_settings,
                     'action': self.on_action_settings}
         if self.is_subboard:
+            # Only what acts on this board; layers, view and settings
+            # are the main board's
+            board = {'icon': 'subboard', 'label': 'this sub board',
+                     'menu': self.rb_menu_this_board}
             return [[undo, redo], [arrange, image, find], [draw, notes],
-                    [layers, view, settings]]
+                    [board]]
         return [[undo, redo], [file_, add], [arrange, image, find],
                 [draw, notes], [layers, view, settings]]
 
@@ -558,6 +562,13 @@ class BoardUIMixin:
                 ('action', 'move_window', 'move window'),
             ]
         return entries
+
+    def rb_menu_this_board(self):
+        return ([('label', self.board.title),
+                 ('action', 'fit_scene', 'fit board'),
+                 ('action', 'fit_selection', 'fit selection'),
+                 ('sep',)]
+                + self.rb_board_entries(self.board)[1:])
 
     def rb_menu_settings(self):
         return [
