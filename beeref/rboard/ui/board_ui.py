@@ -11,6 +11,7 @@ note callouts and the pen tool."""
 
 import math
 import os
+import sys
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
@@ -557,6 +558,8 @@ class BoardUIMixin:
     def rb_menu_view(self):
         entries = [
             ('submenu', 'area', self.rb_menu_area, {'icon': 'grid'}),
+            ('submenu', 'overlay over other apps', self.rb_menu_overlay,
+             {'icon': 'eye'}),
             ('sep',),
             ('action', 'fit_scene', 'fit board'),
             ('action', 'fit_selection', 'fit selection'),
@@ -579,6 +582,9 @@ class BoardUIMixin:
                  ('action', 'fit_scene', 'fit board'),
                  ('action', 'fit_selection', 'fit selection'),
                  ('item', 'export as web page…', self.rb_export_web),
+                 ('item', 'overlay this board',
+                  lambda: self.rb_overlay(self.rb_images(),
+                                          self.board.title)),
                  ('sep',)]
                 + self.rb_board_entries(self.board)[1:])
 
@@ -919,6 +925,11 @@ class BoardUIMixin:
              {'icon': 'grid', 'hint': ', '.join(shown)}),
             ('item', 'export palette…',
              lambda: self.rb_export_palette(targets), {'icon': 'palette'}),
+            ('item', 'overlay these images' if len(targets) > 1
+             else 'overlay this image',
+             lambda: self.rb_overlay(targets), {'icon': 'eye',
+                                                'tooltip': 'float it over '
+                                                'other apps, see-through'}),
         ]
         board_key = self.board.key if self.is_subboard else ''
         if board_key.startswith('tag:'):
@@ -1010,6 +1021,43 @@ class BoardUIMixin:
             self.rb_meta_change(items, 'note',
                                 [dialog.result_text] * len(items),
                                 'Edit note')
+
+    # ---------- overlay ----------
+
+    def rb_menu_overlay(self):
+        from beeref.rboard import overlay
+        selected = self.rb_selected(images_only=True)
+        hotkey = self.settings.value('Overlay/hotkey',
+                                     overlay.DEFAULT_HOTKEY)
+        return [
+            ('label', f'{hotkey} switches click-through'),
+            ('item', f'the {len(selected)} selected' if selected
+             else 'the selection', lambda: self.rb_overlay(selected),
+             {'enabled': bool(selected)}),
+            ('item', 'the whole board', lambda: self.rb_overlay(
+                self.rb_images(), 'board')),
+            ('item', 'close the overlay',
+             lambda: overlay.current() and overlay.current().close(),
+             {'enabled': overlay.current() is not None}),
+        ]
+
+    def rb_overlay(self, items, title='overlay'):
+        """Float images over other apps: see-through, clicks pass to
+        the app below until the hotkey lets you move and zoom it."""
+        from beeref.rboard import overlay
+        items = [i for i in items if getattr(i, 'is_image', False)]
+        if not items:
+            self.rb_notify('select some images first')
+            return
+        shown = overlay.open_overlay(items, self.settings, title)
+        hotkey = shown.hotkey_text()
+        if shown.hotkey.registered or sys.platform != 'win32':
+            self.rb_notify(f'overlay open · {hotkey} lets clicks through '
+                           'or back')
+        else:
+            self.rb_notify(f'overlay open · {hotkey} is taken by another '
+                           'app, use the tray icon or pick another key in '
+                           'settings')
 
     # ---------- web page ----------
 

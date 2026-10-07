@@ -527,6 +527,11 @@ class SettingsDialog(QtWidgets.QDialog):
             section_label('notes'),
             setting_check(s, 'Appearance/show_notes',
                           'always show notes, not just on hover'),
+            section_label('overlay'),
+            FieldRow('overlay hotkey', self.hotkey_field(s),
+                     'switches the overlay between letting clicks through '
+                     'and moving it. works from any app. the default is '
+                     'free in Photoshop, Premiere and Blender'),
         )))
         from beeref.rboard.ui.plugins_ui import PluginsPage
         self.pages.addWidget(self.scrolled(PluginsPage(view, s)))
@@ -549,6 +554,27 @@ class SettingsDialog(QtWidgets.QDialog):
         close.clicked.connect(self.accept)
         outer.addLayout(button_row(reset, None, close))
         self.show()
+
+    def hotkey_field(self, settings):
+        from beeref.rboard import overlay
+        field = QtWidgets.QLineEdit(str(settings.value(
+            'Overlay/hotkey', overlay.DEFAULT_HOTKEY)))
+        field.setPlaceholderText(overlay.DEFAULT_HOTKEY)
+
+        def save():
+            text = field.text().strip() or overlay.DEFAULT_HOTKEY
+            if overlay.parse_hotkey(text) is None:
+                field.setStyleSheet(f'color: {tm().hex("danger")};')
+                field.setToolTip('like Ctrl+Alt+` or Ctrl+Shift+F12')
+                return
+            field.setStyleSheet('')
+            field.setText(text)
+            settings.setValue('Overlay/hotkey', text)
+            shown = overlay.current()
+            if shown is not None:
+                shown.hotkey.register(text)
+        field.editingFinished.connect(save)
+        return field
 
     def quality_combo(self, settings):
         from beeref.rboard import imagestore
