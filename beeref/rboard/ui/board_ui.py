@@ -942,6 +942,13 @@ class BoardUIMixin:
                 else (lambda: self.rb_add_tag(targets, tag)),
                 {'icon': 'star-outline'})]
         entries += self.rb_link_entries(item)
+        from beeref.rboard import plugins
+        if plugins.image_actions:
+            entries.append(('sep',))
+            for plugin, label, callback in plugins.image_actions:
+                entries.append((
+                    'item', label,
+                    lambda cb=callback: self.rb_plugin_call(cb, targets)))
 
         has_note = bool(item.meta.get('note'))
         entries += [

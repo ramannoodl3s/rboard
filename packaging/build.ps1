@@ -1,5 +1,6 @@
 # Builds the portable R Board zip, dist\R-Board-<version>-portable.zip,
-# and the AI features plugin, dist\R-Board-AI-<version>.zip.
+# and the public plugins: AI features, Source finder and Video frames
+# (dist\R-Board-AI-, -Source-, -Video-<version>.zip).
 # Used locally (.\packaging\build.ps1 -Python .venv\Scripts\python.exe)
 # and by the release workflow on GitHub (.github\workflows\release.yml).
 param([string]$Python = "python")
@@ -43,5 +44,30 @@ $aiZip = "dist\R-Board-AI-$version.zip"
 if (Test-Path $aiZip) { Remove-Item $aiZip }
 Compress-Archive -Path "$ai\*" -DestinationPath $aiZip -CompressionLevel Optimal
 
+# The other public plugins: code, plus any libraries in lib\
+function Build-Plugin($id, $module, $zipName, $packages) {
+    $dir = "build\$id-plugin"
+    New-Item -ItemType Directory $dir | Out-Null
+    Copy-Item "plugins\$id\$module" $dir
+    $m = Get-Content "plugins\$id\plugin.json" -Raw | ConvertFrom-Json
+    $m.version = $version
+    if ($packages) {
+        $m.python = (& $Python -c "import sys; print(f'cp{sys.version_info[0]}{sys.version_info[1]}')").Trim()
+        & $Python -m pip install --quiet --no-deps --only-binary=:all: --target "$dir\lib" @packages
+        if ($LASTEXITCODE -ne 0) { throw "pip failed for $id" }
+        if (Test-Path "$dir\lib\bin") { Remove-Item "$dir\lib\bin" -Recurse -Force }
+    }
+    [IO.File]::WriteAllText("$PWD\$dir\plugin.json", ($m | ConvertTo-Json))
+    Copy-Item LICENSE "$dir\LICENSE.txt"
+    $out = "dist\$zipName-$version.zip"
+    if (Test-Path $out) { Remove-Item $out }
+    Compress-Archive -Path "$dir\*" -DestinationPath $out -CompressionLevel Optimal
+    return $out
+}
+$sourceZip = Build-Plugin "source" "rboard_source.py" "R-Board-Source" @()
+$videoZip = Build-Plugin "video" "rboard_video.py" "R-Board-Video" @("av>=14", "yt-dlp")
+
 Write-Output $zip
 Write-Output $aiZip
+Write-Output $sourceZip
+Write-Output $videoZip

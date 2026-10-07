@@ -12,7 +12,7 @@ import logging
 import os
 import tempfile
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from beeref import fileio, widgets
 from beeref.rboard import plugins, semantic
@@ -105,6 +105,117 @@ def install_ai(view, then=None, ask=True):
     view.ai_install_worker = worker
     view.ai_install_progress = widgets.BeeProgressDialog(
         'installing AI features…', worker=worker, parent=view)
+    worker.start()
+
+
+# ---------- background tasks for plugins ----------
+
+class _Task(QtCore.QThread):
+    # ThreadedIO's signals, for BeeProgressDialog
+    progress = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(str, list)
+    begin_processing = QtCore.pyqtSignal(int)
+    user_input_required = QtCore.pyqtSignal(str)
+
+    def __init__(self, work):
+        super().__init__()
+        self.work = work
+        self.canceled = False
+        self.result = None
+        self.error = None
+
+    def on_canceled(self):
+        self.canceled = True
+
+    def run(self):
+        self.begin_processing.emit(1000)
+        try:
+            self.result = self.work(
+                lambda f: self.progress.emit(int(max(0, min(f, 1)) * 1000)),
+                lambda: self.canceled)
+        except Exception as e:
+            logger.exception('Plugin task failed')
+            self.error = e
+        self.finished.emit('', [])
+
+
+def run_task(view, title, work, done):
+    """PluginAPI.run_in_background: work(progress, canceled) on a
+    thread, a progress window meanwhile, done(result, error) after."""
+    task = _Task(work)
+    tasks = getattr(view, 'rb_plugin_tasks', set())
+    view.rb_plugin_tasks = tasks
+    tasks.add(task)
+
+    def finished(*_):
+        tasks.discard(task)
+        try:
+            done(task.result, task.error)
+        except Exception as e:
+            logger.exception('Plugin task callback failed')
+            notify = getattr(view, 'rb_notify', None)
+            if notify:
+                notify(f'the plugin hit a problem: {e}')
+            else:
+                QtWidgets.QMessageBox.warning(
+                    view, 'plugin', f'the plugin hit a problem: {e}')
+    task.finished.connect(finished)
+    task.dialog = widgets.BeeProgressDialog(title, worker=task, parent=view)
+    task.start()
+    return task
+
+
+# ---------- plugins from the release ----------
+
+def _run_catalog_install(window, plugin_id, worker):
+    worker.begin_processing.emit(100)
+    try:
+        path = os.path.join(tempfile.gettempdir(), f'R-Board-{plugin_id}.zip')
+        plugins.download(
+            plugins.catalog_url(plugin_id), path,
+            on_progress=lambda d, t: worker.progress.emit(
+                int(d * 100 / t) if t else 0),
+            is_canceled=lambda: worker.canceled)
+        plugin, restart = plugins.install_zip(path)
+        os.remove(path)
+        worker.restart = restart
+    except Exception as e:
+        logger.exception('Plugin install failed')
+        worker.finished.emit('', [str(e)])
+        return
+    worker.finished.emit('', [])
+
+
+def install_catalog(view, plugin_id, then=None):
+    """Download and install one of the release's public plugins."""
+    entry = plugins.CATALOG[plugin_id]
+    worker = fileio.ThreadedIO(_run_catalog_install, view.window(),
+                               plugin_id)
+    worker.restart = False
+
+    def finished(filename, errors):
+        if errors:
+            if 'canceled' not in errors[0]:
+                QtWidgets.QMessageBox.warning(
+                    view, entry['name'],
+                    f"couldn't install {entry['name']}: {errors[0]}")
+            return
+        if worker.restart:
+            message = f"{entry['name']} starts when R Board restarts."
+        else:
+            plugin = plugins.load(plugins.discover()[plugin_id],
+                                  view.window())
+            message = (f"{entry['name']} installed but couldn't start: "
+                       f'{plugin.error}' if plugin.error
+                       else f"{entry['name']} is installed.")
+        QtWidgets.QMessageBox.information(view, entry['name'], message)
+        if then:
+            then()
+
+    worker.finished.connect(finished)
+    view.catalog_worker = worker
+    view.catalog_progress = widgets.BeeProgressDialog(
+        f"installing {entry['name']}…", worker=worker, parent=view)
     worker.start()
 
 
@@ -234,8 +345,22 @@ class PluginsPage(QtWidgets.QWidget):
             if widget:
                 widget.deleteLater()
         others = [p for p in plugins.all_plugins() if p.id != plugins.AI_ID]
-        if not others:
-            self.list_box.addWidget(QtWidgets.QLabel('none installed'))
+        installed = {p.id for p in others}
+        for plugin_id, entry in plugins.CATALOG.items():
+            if plugin_id in installed:
+                continue
+            label = QtWidgets.QLabel(
+                f"{entry['about']} · about {entry['size_mb']} MB")
+            label.setWordWrap(True)
+            get = QtWidgets.QPushButton('get')
+            get.clicked.connect(lambda _, i=plugin_id: install_catalog(
+                self.view, i, then=self.refresh))
+            row = QtWidgets.QWidget()
+            h = QtWidgets.QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.addWidget(label, 1)
+            h.addWidget(get)
+            self.list_box.addWidget(self.FieldRow(entry['name'], row))
         for p in others:
             status = p.error or ('running' if p.loaded
                                  else 'starts after a restart')
@@ -250,6 +375,20 @@ class PluginsPage(QtWidgets.QWidget):
             h.addWidget(label, 1)
             h.addWidget(remove)
             self.list_box.addWidget(self.FieldRow(p.name, row))
+            for owner, key, text, kind, help_text in plugins.setting_fields:
+                if owner.id == p.id:
+                    self.list_box.addWidget(self.FieldRow(
+                        text, self.setting_field(p, key, kind), help_text))
+
+    def setting_field(self, plugin, key, kind):
+        from beeref.config import BeeSettings
+        name = f'Plugins/{plugin.id}/{key}'
+        field = QtWidgets.QLineEdit(str(BeeSettings().value(name, '') or ''))
+        if kind == 'secret':
+            field.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        field.editingFinished.connect(
+            lambda: BeeSettings().setValue(name, field.text().strip()))
+        return field
 
     def toggle_ai(self):
         if semantic.ready():

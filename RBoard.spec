@@ -68,7 +68,8 @@ a = Analysis(
     # Developer tools that come along with the dependencies otherwise,
     # and the AI libraries, which come in the AI features plugin
     excludes=['tkinter', 'pytest', 'IPython', 'matplotlib', 'playwright',
-              'onnxruntime', 'tokenizers', 'huggingface_hub'],
+              'onnxruntime', 'tokenizers', 'huggingface_hub',
+              'av', 'yt_dlp'],   # plugins bring their own
     noarchive=False)
 
 pyz = PYZ(a.pure)

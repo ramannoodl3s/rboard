@@ -647,6 +647,14 @@ class RBoardMixin:
         """Dropped PureRef boards get imported and dropped folders add
         their images (with source links from a links.txt beside them).
         Returns True if the drop was handled."""
+        from beeref.rboard import plugins
+        texts = [u.toLocalFile() if u.isLocalFile() else u.toString()
+                 for u in urls]
+        handler = plugins.drop_handler_for(texts)
+        if handler is not None:
+            callback, taken = handler
+            self.rb_plugin_call(callback, taken)
+            return True
         local = [u.toLocalFile() for u in urls if u.isLocalFile()]
         if local and local[0].lower().endswith('.pur'):
             self.rb_import_pureref(os.path.normpath(local[0]))
@@ -663,6 +671,15 @@ class RBoardMixin:
         self.do_insert_images(
             [QtCore.QUrl.fromLocalFile(f) for f in files])
         return True
+
+    def rb_plugin_call(self, callback, *args):
+        """Run a plugin's callback; a failing plugin says so instead of
+        taking the app down."""
+        try:
+            callback(self, *args)
+        except Exception as e:
+            logger.exception('Plugin action failed')
+            self.rb_notify(f'the plugin hit a problem: {e}')
 
     # ---------- PureRef ----------
 

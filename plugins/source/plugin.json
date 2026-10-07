@@ -1,0 +1,8 @@
+{
+  "id": "source",
+  "name": "Source finder",
+  "version": "1.0.0",
+  "api": 2,
+  "module": "rboard_source",
+  "description": "Find where an image came from and who made it."
+}

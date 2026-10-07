@@ -1,0 +1,9 @@
+{
+  "id": "video",
+  "name": "Video frames",
+  "version": "1.0.0",
+  "api": 2,
+  "python": "cp311",
+  "module": "rboard_video",
+  "description": "Grab frames from video files and YouTube links."
+}
