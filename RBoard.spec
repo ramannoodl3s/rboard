@@ -61,7 +61,9 @@ a = Analysis(
         '**/*.html', '**/*.png', '**/*.json', '**/*.npz', '**/*.ico']),
     hiddenimports=(collect_submodules('winrt')
                    + collect_submodules('beeref')
-                   + standard_library()),
+                   + standard_library()
+                   # Qt parts only plugins use (the 3D viewer)
+                   + ['PyQt6.QtOpenGL', 'PyQt6.QtOpenGLWidgets']),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -69,7 +71,7 @@ a = Analysis(
     # and the AI libraries, which come in the AI features plugin
     excludes=['tkinter', 'pytest', 'IPython', 'matplotlib', 'playwright',
               'onnxruntime', 'tokenizers', 'huggingface_hub',
-              'av', 'yt_dlp'],   # plugins bring their own
+              'av', 'yt_dlp', 'moderngl', 'glcontext'],  # in plugins
     noarchive=False)
 
 pyz = PYZ(a.pure)

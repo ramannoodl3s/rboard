@@ -20,6 +20,8 @@ PluginAPI. `python` is only needed when `lib` holds compiled code.
 API 2 (API 1 plugins still load) adds image right-click actions, drop
 handlers, putting images on the board, undoable image data changes,
 plugin settings shown on the plugins page, and background tasks.
+API 3 adds double-click handlers, badges on images, and live widgets in
+the overlay.
 """
 
 import json
@@ -36,8 +38,8 @@ from beeref import constants
 
 logger = logging.getLogger(__name__)
 
-API_VERSION = 2
-SUPPORTED_APIS = (1, 2)
+API_VERSION = 3
+SUPPORTED_APIS = (1, 2, 3)
 PYTHON_TAG = f'cp{sys.version_info.major}{sys.version_info.minor}'
 MANIFEST = 'plugin.json'
 REMOVE_MARK = '.remove'
@@ -56,6 +58,10 @@ CATALOG = {
     'video': {'name': 'Video frames', 'file': 'R-Board-Video-{version}.zip',
               'size_mb': 45,
               'about': 'grab frames from video files and YouTube links'},
+    'model3d': {'name': '3D models', 'file': 'R-Board-3D-{version}.zip',
+                'size_mb': 3,
+                'about': 'view, light, pose and overlay .obj, .fbx and '
+                         '.glb models'},
 }
 
 services = {}      # name -> object a plugin provides (e.g. 'ai')
@@ -63,6 +69,8 @@ actions = []       # (plugin, label, callback(view)) for the plugins menu
 image_actions = []  # (plugin, label, callback(view, items)) on images
 drop_handlers = []  # (plugin, match(text) -> bool, callback(view, texts))
 setting_fields = []  # (plugin, key, label, kind, help)
+open_handlers = []  # (plugin, match(item) -> bool, callback(view, item))
+badges = []         # (plugin, match(item) -> bool, paint(painter, rect))
 _loaded = {}       # id -> Plugin
 _tried = set()     # ids ensure() already looked for
 
@@ -183,6 +191,25 @@ class PluginAPI:
 
     def notify(self, view, text):
         view.rb_notify(text)
+
+    # -- API 3 --
+
+    def add_open_handler(self, match, callback):
+        """Double-clicking a board image that match(item) accepts calls
+        callback(view, item) instead of zooming to it."""
+        open_handlers.append((self.plugin, match, callback))
+
+    def add_badge(self, match, paint):
+        """paint(painter, rect) draws a small mark over images that
+        match(item) accepts; rect is a 20 px square in screen size, in
+        the image's top-left corner."""
+        badges.append((self.plugin, match, paint))
+
+    def open_overlay(self, view, widget, title='overlay'):
+        """Show a live widget in the overlay window (see-through, on
+        top, clicks pass through on the hotkey)."""
+        from beeref.rboard import overlay
+        return overlay.open_overlay([], view.settings, title, widget)
 
     def run_in_background(self, view, title, work, done):
         """Run work(progress, canceled) on a worker thread with a
@@ -424,6 +451,17 @@ def catalog_url(plugin_id):
     return RELEASE_URL.format(
         version=constants.VERSION,
         file=entry['file'].format(version=constants.VERSION))
+
+
+def open_handler_for(item):
+    for plugin, match, callback in open_handlers:
+        if _safe(match, item):
+            return callback
+    return None
+
+
+def badges_for(item):
+    return [paint for plugin, match, paint in badges if _safe(match, item)]
 
 
 def drop_handler_for(texts):

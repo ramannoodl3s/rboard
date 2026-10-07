@@ -590,7 +590,30 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             if guide_kinds:
                 from beeref.rboard import guides
                 guides.paint(painter, self.crop, guide_kinds)
+            from beeref.rboard import plugins
+            if plugins.badges:
+                self._paint_badges(painter, plugins.badges_for(self))
             self.paint_selectable(painter, option, widget)
+
+    def _paint_badges(self, painter, paints):
+        """Plugin marks in the top-left corner, the same size on screen
+        at any zoom."""
+        if not paints:
+            return
+        t = painter.combinedTransform()
+        scale = (t.m11() ** 2 + t.m12() ** 2) ** 0.5 or 1
+        side = 20 / scale
+        if side * 3 > min(self.crop.width(), self.crop.height()):
+            return   # too small on screen to carry a mark
+        painter.save()
+        for i, paint in enumerate(paints):
+            rect = QtCore.QRectF(self.crop.left() + side * (0.3 + 1.2 * i),
+                                 self.crop.top() + side * 0.3, side, side)
+            try:
+                paint(painter, rect)
+            except Exception:
+                logger.exception('Plugin badge failed')
+        painter.restore()
 
     def draw_image(self, painter, rect):
         """Draw the part `rect` (image coordinates) from the copy that

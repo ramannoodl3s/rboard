@@ -48,6 +48,7 @@ Everything runs on your own computer.
 Also free, from **settings → plugins**:
 - **Source finder**: right-click an image → "find original…" to find where it came from and who made it (SauceNAO, with Google Lens and Yandex too)
 - **Video frames**: open a video file or paste a YouTube link, scrub through it and put frames on your board
+- **3D models**: open .obj, .fbx or .glb models, orbit them with Blender's controls, light them (key, 2-point, 3-point or an HDRI), pose rigged ones, float them over other apps, and put views on your board
 
 ## Credits
 

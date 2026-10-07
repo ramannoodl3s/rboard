@@ -383,6 +383,13 @@ class PluginsPage(QtWidgets.QWidget):
     def setting_field(self, plugin, key, kind):
         from beeref.config import BeeSettings
         name = f'Plugins/{plugin.id}/{key}'
+        if kind == 'check':
+            box = QtWidgets.QCheckBox()
+            box.setChecked(str(BeeSettings().value(name, 'false')).lower()
+                           == 'true')
+            box.toggled.connect(lambda on: BeeSettings().setValue(
+                name, 'true' if on else 'false'))
+            return box
         field = QtWidgets.QLineEdit(str(BeeSettings().value(name, '') or ''))
         if kind == 'secret':
             field.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)

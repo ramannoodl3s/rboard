@@ -1,6 +1,6 @@
 # Builds the portable R Board zip, dist\R-Board-<version>-portable.zip,
-# and the public plugins: AI features, Source finder and Video frames
-# (dist\R-Board-AI-, -Source-, -Video-<version>.zip).
+# and the public plugins: AI features, Source finder, Video frames
+# and 3D models (dist\R-Board-AI-, -Source-, -Video-, -3D-<version>.zip).
 # Used locally (.\packaging\build.ps1 -Python .venv\Scripts\python.exe)
 # and by the release workflow on GitHub (.github\workflows\release.yml).
 param([string]$Python = "python")
@@ -48,7 +48,9 @@ Compress-Archive -Path "$ai\*" -DestinationPath $aiZip -CompressionLevel Optimal
 function Build-Plugin($id, $module, $zipName, $packages) {
     $dir = "build\$id-plugin"
     New-Item -ItemType Directory $dir | Out-Null
-    Copy-Item "plugins\$id\$module" $dir
+    # A module file, or a package folder (without Python caches)
+    Copy-Item "plugins\$id\$module" $dir -Recurse
+    Get-ChildItem $dir -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
     $m = Get-Content "plugins\$id\plugin.json" -Raw | ConvertFrom-Json
     $m.version = $version
     if ($packages) {
@@ -66,8 +68,10 @@ function Build-Plugin($id, $module, $zipName, $packages) {
 }
 $sourceZip = Build-Plugin "source" "rboard_source.py" "R-Board-Source" @()
 $videoZip = Build-Plugin "video" "rboard_video.py" "R-Board-Video" @("av>=14", "yt-dlp")
+$modelZip = Build-Plugin "model3d" "rboard_model3d" "R-Board-3D" @("moderngl>=5.8", "glcontext")
 
 Write-Output $zip
 Write-Output $aiZip
 Write-Output $sourceZip
 Write-Output $videoZip
+Write-Output $modelZip

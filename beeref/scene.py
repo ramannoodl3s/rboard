@@ -418,6 +418,13 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def mouseDoubleClickEvent(self, event):
         self.cancel_active_modes()
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
+        if item and getattr(item, 'is_image', False):
+            from beeref.rboard import plugins
+            handler = plugins.open_handler_for(item) if \
+                plugins.open_handlers else None
+            if handler is not None:
+                self.views()[0].rb_plugin_call(handler, item)
+                return
         if item:
             if not item.isSelected():
                 item.setSelected(True)

@@ -253,7 +253,7 @@ class GrabBar(QtWidgets.QWidget):
 
 
 class Overlay(QtWidgets.QWidget):
-    def __init__(self, items, settings, title='overlay'):
+    def __init__(self, items, settings, title='overlay', widget=None):
         super().__init__(None, Qt.WindowType.Window
                          | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint
@@ -264,10 +264,16 @@ class Overlay(QtWidgets.QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.scene = OverlayScene()
-        for copy in copies(items):
+        for copy in copies(items or []):
             self.scene.addItem(copy)
-        self.view = OverlayView(self)
-        self.view.setScene(self.scene)
+        if widget is not None:
+            # A plugin's own live view (e.g. a 3D model)
+            self.view = widget
+            widget.setParent(self)
+            widget.fit = getattr(widget, 'fit', lambda: None)
+        else:
+            self.view = OverlayView(self)
+            self.view.setScene(self.scene)
         self.bar = None
         self.grip = QtWidgets.QSizeGrip(self)
         self.grip.resize(18, 18)
@@ -399,12 +405,13 @@ class Overlay(QtWidgets.QWidget):
         super().closeEvent(event)
 
 
-def open_overlay(items, settings, title='overlay'):
-    """Show these images as the overlay (replacing any open one)."""
+def open_overlay(items, settings, title='overlay', widget=None):
+    """Show these images (or a plugin's widget) as the overlay,
+    replacing any open one."""
     global _current
     if _current is not None:
         _current.close()
-    _current = Overlay(items, settings, title)
+    _current = Overlay(items, settings, title, widget)
     _current.show()
     _current.raise_()
     return _current

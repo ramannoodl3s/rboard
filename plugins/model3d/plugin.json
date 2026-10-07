@@ -1,0 +1,9 @@
+{
+  "id": "model3d",
+  "name": "3D models",
+  "version": "1.0.0",
+  "api": 3,
+  "python": "cp311",
+  "module": "rboard_model3d",
+  "description": "View, light, pose and overlay .obj, .fbx and .glb models."
+}
