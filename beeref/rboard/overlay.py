@@ -194,6 +194,10 @@ def copies(items):
                      False)
         copy.setFlag(
             QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+        # Only to look at: board images' own mouse handling expects a
+        # board around them. Presses fall through to the view, which pans.
+        copy.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        copy.setAcceptHoverEvents(False)
         out.append(copy)
     return out
 

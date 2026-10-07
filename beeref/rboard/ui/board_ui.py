@@ -591,8 +591,6 @@ class BoardUIMixin:
     def rb_menu_settings(self):
         return [
             ('action', 'settings', 'settings…'),
-            ('item', 'plugins…',
-             lambda: self.on_action_settings(page='plugins')),
             ('action', 'keyboard_settings', 'keyboard & mouse…'),
             ('sep',),
             ('action', 'help', 'help'),
