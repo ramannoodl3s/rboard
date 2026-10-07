@@ -294,6 +294,18 @@ actions = ActionList([
         group='active_when_selection',
     ),
     Action(
+        id='arrange_similar_map',
+        text='By Similarity (Map)',
+        callback='on_action_arrange_similar_map',
+        group='active_when_selection',
+    ),
+    Action(
+        id='arrange_similar_grid',
+        text='By Similarity (Grid)',
+        callback='on_action_arrange_similar_grid',
+        group='active_when_selection',
+    ),
+    Action(
         id='sort_color',
         text='Sort by &Colour...',
         shortcuts=['Shift+K'],

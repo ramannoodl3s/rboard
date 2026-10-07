@@ -118,6 +118,71 @@ class ContentMixin:
         else:
             install_ai(self, then)
 
+    # ---------- arranging by similarity ----------
+
+    def on_action_arrange_similar_map(self):
+        self.rb_arrange_similar('map')
+
+    def on_action_arrange_similar_grid(self):
+        self.rb_arrange_similar('grid')
+
+    def rb_arrange_similar(self, mode):
+        """Alike images together: by what they show with the AI
+        features, else by colour."""
+        self.cancel_active_modes()
+        items = [i for i in self.rb_selected() if i.is_image]
+        if len(items) < 3:
+            self.rb_notify('select at least 3 images (Ctrl+A for all)')
+            return
+        if semantic.installed('vision'):
+            self.rb_index_content(
+                items, then=lambda: self._rb_similar(items, mode, True))
+        else:
+            self._rb_similar(items, mode, False)
+
+    def _rb_similar(self, items, mode, by_content):
+        from beeref.rboard import similarity
+        try:
+            items = [i for i in items if i.scene() is self.scene]
+        except RuntimeError:
+            return
+        if len(items) < 3:
+            return
+        vectors = None
+        if by_content:
+            vectors = [semantic.vector(getattr(i, 'link_source', i))
+                       for i in items]
+            if any(v is None for v in vectors):
+                vectors = None
+        if vectors is None:
+            stats = self.rb_analyze(items)
+            if stats is None:
+                return
+            vectors = [similarity.colour_features(s) for s in stats]
+        center = self.scene.itemsBoundingRect(items=items).center()
+        QtWidgets.QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            points = similarity.tsne(similarity.normalise(vectors))
+            gap = self.rb_gap(items)
+            if mode == 'grid':
+                order = similarity.grid_order(points)
+                items = [items[i] for i in order]
+                sizes = [self._rb_size(i) for i in items]
+                placements = layouts.grid(sizes, gap)
+            else:
+                sizes = [self._rb_size(i) for i in items]
+                placements = similarity.map_layout(sizes, points, gap)
+            self.rb_place(items, placements, center=center)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if not by_content:
+            self.rb_notify('arranged by colour · with the AI features it '
+                           'goes by what the images show')
+
+    def _rb_size(self, item):
+        rect = self.scene.itemsBoundingRect(items=[item])
+        return rect.width(), rect.height()
+
     # ---------- indexing ----------
 
     def rb_content_unread(self, items=None):

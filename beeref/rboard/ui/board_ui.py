@@ -397,6 +397,7 @@ class BoardUIMixin:
             ('action', 'export_scene', 'export board as image…'),
             ('action', 'export_selection', 'export selection as image…'),
             ('action', 'export_images', 'export images…'),
+            ('item', 'export as web page…', self.rb_export_web),
             ('sep',),
             ('action', 'quit', 'quit'),
         ]
@@ -429,6 +430,8 @@ class BoardUIMixin:
                 ('action', 'arrange_square', 'in a square', ALL)]),
             ('sep',), ('label', 'content'),
             ('action', 'group_content', 'group by content…', ALL),
+            ('action', 'arrange_similar_map', 'by similarity (map)', ALL),
+            ('action', 'arrange_similar_grid', 'by similarity (grid)', ALL),
             ('sep',), ('label', 'size'),
             ('action', 'normalize_height', 'same height', ALL),
             ('action', 'normalize_width', 'same width', ALL),
@@ -575,6 +578,7 @@ class BoardUIMixin:
         return ([('label', self.board.title),
                  ('action', 'fit_scene', 'fit board'),
                  ('action', 'fit_selection', 'fit selection'),
+                 ('item', 'export as web page…', self.rb_export_web),
                  ('sep',)]
                 + self.rb_board_entries(self.board)[1:])
 
@@ -1006,6 +1010,60 @@ class BoardUIMixin:
             self.rb_meta_change(items, 'note',
                                 [dialog.result_text] * len(items),
                                 'Edit note')
+
+    # ---------- web page ----------
+
+    def rb_export_web(self):
+        """This board as one .html file to send to anyone."""
+        from beeref import fileio, widgets
+        from beeref.rboard import web_export
+        from beeref.rboard.subboards import board_rule
+        if not self.rb_images():
+            self.rb_notify('add some images first')
+            return
+        limits = web_export.LIMITS_MB
+        options = [f'{mb} MB' + (' (recommended)'
+                                 if mb == web_export.DEFAULT_LIMIT_MB else '')
+                   for mb in limits]
+        options.append('no limit (full quality, can be very large)')
+        choice, ok = QtWidgets.QInputDialog.getItem(
+            self, 'export as web page', 'keep the page under',
+            options, limits.index(web_export.DEFAULT_LIMIT_MB), False)
+        if not ok:
+            return
+        index = options.index(choice)
+        limit = limits[index] if index < len(limits) else None
+        main = self.rb_main()
+        if self.is_subboard:
+            title, text = self.board.title, self.board.description
+            rule = board_rule(self.board)
+        else:
+            title = os.path.splitext(os.path.basename(
+                main.filename))[0] if main.filename else 'R Board'
+            text, rule = '', None
+        folder = os.path.dirname(main.filename) if main.filename else ''
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, 'export as web page', os.path.join(folder, title + '.html'),
+            'Web page (*.html)')
+        if not path:
+            return
+        if not path.lower().endswith(('.html', '.htm')):
+            path += '.html'
+        board = web_export.gather(self, title, text, rule)
+        exporter = web_export.WebPageExporter(board, limit)
+        self.worker = fileio.ThreadedIO(exporter.export, path)
+
+        def done(filename, errors):
+            if errors:
+                self.on_export_finished(filename, errors)
+            elif os.path.exists(filename):
+                size = os.path.getsize(filename) / 1e6
+                self.rb_notify(f'saved {os.path.basename(filename)} '
+                               f'· {size:.1f} MB')
+        self.worker.finished.connect(done)
+        self.progress = widgets.BeeProgressDialog(
+            'making the web page', worker=self.worker, parent=self)
+        self.worker.start()
 
     # ---------- drawing guides and palettes ----------
 
