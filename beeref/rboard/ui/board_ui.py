@@ -453,6 +453,14 @@ class BoardUIMixin:
              {'icon': 'palette'}),
             ('action', 'sample_color', 'pick a colour'),
             ('action', 'show_color_gamut', 'colour spread'),
+            ('item', 'export palette…',
+             lambda: self.rb_export_palette(
+                 self.rb_selected(images_only=True)),
+             {'enabled': bool(self.rb_selected(images_only=True))}),
+            ('submenu', 'drawing guides',
+             lambda: self.rb_guide_entries(
+                 self.rb_selected(images_only=True)),
+             {'enabled': bool(self.rb_selected(images_only=True))}),
             ('sep',), ('label', 'content'),
             ('action', 'index_content', 'read image content'),
             ('sep',), ('label', 'text and links'),
@@ -898,6 +906,16 @@ class BoardUIMixin:
                    ]
         targets = self.rb_targets(item)
         entries += self.rb_study_entries(item, targets)
+        from beeref.rboard import guides
+        shown = [label for kind, label in guides.KINDS
+                 if kind in item.meta.get('guides', [])]
+        entries += [
+            ('submenu', 'drawing guides',
+             lambda: self.rb_guide_entries(targets),
+             {'icon': 'grid', 'hint': ', '.join(shown)}),
+            ('item', 'export palette…',
+             lambda: self.rb_export_palette(targets), {'icon': 'palette'}),
+        ]
         board_key = self.board.key if self.is_subboard else ''
         if board_key.startswith('tag:'):
             # Confirm or drop suggestions straight from the tag's board
@@ -988,6 +1006,87 @@ class BoardUIMixin:
             self.rb_meta_change(items, 'note',
                                 [dialog.result_text] * len(items),
                                 'Edit note')
+
+    # ---------- drawing guides and palettes ----------
+
+    def rb_guide_entries(self, targets):
+        from beeref.rboard import guides
+        current = set(targets[0].meta.get('guides', [])) if targets else set()
+        entries = []
+        for kind, label in guides.KINDS:
+            on = kind in current
+            entries.append((
+                'item', label,
+                lambda k=kind, on=on: self.rb_set_guide(targets, k, not on),
+                {'checked': on}))
+        entries += [
+            ('sep',),
+            ('item', 'no guides',
+             lambda: self.rb_meta_change(targets, 'guides',
+                                         [[] for _ in targets],
+                                         'Remove drawing guides'),
+             {'enabled': any(t.meta.get('guides') for t in targets)}),
+        ]
+        return entries
+
+    def rb_set_guide(self, targets, kind, on):
+        from beeref.rboard import guides
+        order = [k for k, _ in guides.KINDS]
+        values = []
+        for item in targets:
+            kinds = set(item.meta.get('guides', []))
+            kinds = kinds | {kind} if on else kinds - {kind}
+            values.append([k for k in order if k in kinds])
+        self.rb_meta_change(targets, 'guides', values, 'Drawing guides')
+
+    def rb_export_palette(self, targets):
+        """Save the colours of one image, or of several merged, for a
+        painting app."""
+        from beeref.rboard import palette_io
+        if not targets:
+            self.rb_notify('select an image first')
+            return
+        if self.rb_analyze(targets) is None:
+            return
+        lists = [c for c in map(palette_io.colours_of, targets) if c]
+        if not lists:
+            self.rb_notify('no colours found in these images')
+            return
+        if len(lists) == 1:
+            colours = lists[0]
+        else:
+            count, ok = QtWidgets.QInputDialog.getInt(
+                self, 'export palette',
+                f'how many colours from the {len(lists)} images?',
+                8, 2, palette_io.PROCREATE_MAX)
+            if not ok:
+                return
+            colours = palette_io.merge(lists, count)
+        name = 'R Board palette'
+        if len(targets) == 1 and targets[0].filename:
+            name = os.path.splitext(
+                os.path.basename(targets[0].filename))[0] or name
+        filters = [f for _, f in palette_io.FORMATS]
+        last = self.settings.value('Palette/format', 'ase')
+        selected = next((f for e, f in palette_io.FORMATS if e == last),
+                        filters[0])
+        path, chosen = QtWidgets.QFileDialog.getSaveFileName(
+            self, 'export palette', name, ';;'.join(filters), selected)
+        if not path:
+            return
+        ext = next((e for e, f in palette_io.FORMATS if f == chosen), None)
+        if ext is None:
+            ext = path.rsplit('.', 1)[-1].lower() if '.' in path else 'ase'
+        if not path.lower().endswith('.' + ext):
+            path += '.' + ext
+        self.settings.setValue('Palette/format', ext)
+        try:
+            palette_io.save(path, colours, name)
+        except (OSError, ValueError) as e:
+            self.rb_notify(f'could not save the palette: {e}')
+            return
+        self.rb_notify(f'saved {len(colours)} colours to '
+                       f'{os.path.basename(path)}')
 
     def rb_copy_text(self, item):
         self.scene.clearSelection()

@@ -586,6 +586,10 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
                 painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
                 paint_marks(painter, marks)
                 painter.restore()
+            guide_kinds = self.meta.get('guides')
+            if guide_kinds:
+                from beeref.rboard import guides
+                guides.paint(painter, self.crop, guide_kinds)
             self.paint_selectable(painter, option, widget)
 
     def draw_image(self, painter, rect):
