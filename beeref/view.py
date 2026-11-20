@@ -152,7 +152,10 @@ class BeeGraphicsView(MainControlsMixin,
             self.welcome_overlay.show()
             self.actiongroup_set_enabled('active_when_items_in_scene', False)
         else:
-            self.setFocus()
+            # R Board: only take focus when leaving the welcome screen;
+            # doing it on every change stole focus from the search box
+            if self.welcome_overlay.isVisible():
+                self.setFocus()
             self.welcome_overlay.clearFocus()
             self.welcome_overlay.hide()
             self.actiongroup_set_enabled('active_when_items_in_scene', True)

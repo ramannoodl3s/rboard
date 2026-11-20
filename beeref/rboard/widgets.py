@@ -133,9 +133,21 @@ class SearchBar(QtWidgets.QFrame):
         close.clicked.connect(self.close_bar)
         layout.addWidget(close)
 
-        self.field.textChanged.connect(self.query_changed)
-        self.field.returnPressed.connect(self.next_requested)
+        # Search once typing pauses, not on every key
+        self.typing_timer = QtCore.QTimer(self)
+        self.typing_timer.setSingleShot(True)
+        self.typing_timer.setInterval(200)
+        self.typing_timer.timeout.connect(
+            lambda: self.query_changed.emit(self.field.text()))
+        self.field.textChanged.connect(self.typing_timer.start)
+        self.field.returnPressed.connect(self.on_return)
         self.field.installEventFilter(self)
+
+    def on_return(self):
+        if self.typing_timer.isActive():   # search what was just typed
+            self.typing_timer.stop()
+            self.query_changed.emit(self.field.text())
+        self.next_requested.emit()
 
     def update_theme(self):
         from beeref.rboard.ui.theme import tm

@@ -50,6 +50,12 @@ Also free, from **settings → plugins**:
 - **Video frames**: open a video file or paste a YouTube link, scrub through it and put frames on your board
 - **3D models**: open .obj, .fbx or .glb models, orbit them with Blender's controls, light them (key, 2-point, 3-point or an HDRI), pose rigged ones, float them over other apps, and put views on your board
 
+## Use your board with Claude
+
+Claude (Claude Code or the Claude desktop app) can look through the board you have open: find images by their tags, text, notes, colours or what they show, look at a few as small thumbnails, and select, tag or gather them into a sub board. It works from what the board already knows, so it never needs your image files, and it only sees an image when it asks to.
+
+Set up once: **settings → copy Claude setup command**, paste it into a terminal, restart Claude Code. Turn it off any time with **settings → let Claude use the board**. It only listens on your own computer.
+
 ## Credits
 
 R Board is built on [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu, and is free software under the GPL-3.0 licence.

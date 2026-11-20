@@ -67,10 +67,15 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         self.screen = Screen(self, self.view)
         self.setCentralWidget(self.screen)
         self.show()
+        # R Board: tools for Claude (idle until Claude calls one)
+        from beeref.rboard import claude_bridge
+        claude_bridge.start(self.view)
 
     def closeEvent(self, event):
         geom = self.saveGeometry()
         self.view.settings.setValue('MainWindow/geometry', geom)
+        from beeref.rboard import claude_bridge
+        claude_bridge.stop()
         event.accept()
 
     def __del__(self):
@@ -105,6 +110,16 @@ sys.excepthook = handle_uncaught_exception
 
 
 def main():
+    if '--claude-mcp' in sys.argv:
+        # R Board: the MCP server for Claude (no window, no Qt); lets
+        # the packaged app serve it without Python installed
+        from beeref.rboard import claude_mcp
+        args = sys.argv[sys.argv.index('--claude-mcp') + 1:]
+        if sys.stdin is None or sys.stdout is None:   # windowed build
+            sys.stdin = open(0, 'r', closefd=False)
+            sys.stdout = open(1, 'w', closefd=False)
+        claude_mcp.main(args)
+        return
     logger.info(f'Starting {constants.APPNAME} version {constants.VERSION}')
     logger.debug('System: %s', ' '.join(platform.uname()))
     logger.debug('Python: %s', platform.python_version())

@@ -589,14 +589,44 @@ class BoardUIMixin:
                 + self.rb_board_entries(self.board)[1:])
 
     def rb_menu_settings(self):
+        from beeref.rboard import claude_bridge
+        on = claude_bridge.is_running()
         return [
             ('action', 'settings', 'settings…'),
             ('action', 'keyboard_settings', 'keyboard & mouse…'),
+            ('sep',),
+            ('item', 'let Claude use the board',
+             lambda: claude_bridge.set_enabled(self, not on),
+             {'checked': on}),
+            ('item', 'copy Claude setup command', self.rb_copy_claude_setup),
             ('sep',),
             ('action', 'help', 'help'),
             ('action', 'about', 'about'),
             ('action', 'debuglog', 'debug log'),
         ]
+
+    def rb_copy_claude_setup(self):
+        """Put the command that adds R Board's tools to Claude Code on
+        the clipboard."""
+        import sys
+        from beeref.rboard import claude_bridge
+        bridge = f'--bridge "{claude_bridge.bridge_path()}"'
+        if getattr(sys, 'frozen', False):
+            # The packaged app serves it itself (no Python needed)
+            run = f'"{sys.executable}" --claude-mcp {bridge}'
+        else:
+            script = os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), 'claude_mcp.py')
+            python = sys.executable
+            console = os.path.join(os.path.dirname(python), 'python.exe')
+            if python.lower().endswith('pythonw.exe') and \
+                    os.path.exists(console):
+                python = console   # MCP talks over stdin/stdout
+            run = f'"{python}" "{script}" {bridge}'
+        command = f'claude mcp add rboard --scope user -- {run}'
+        QtWidgets.QApplication.clipboard().setText(command)
+        self.rb_notify('copied: paste it in a terminal to give Claude '
+                       'Code the board tools')
 
     # ---------- layers ----------
 

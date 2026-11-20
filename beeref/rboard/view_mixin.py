@@ -598,14 +598,12 @@ class RBoardMixin:
     def rb_search(self, query):
         self.rb_main().rb_refresh_profile()
         words = query.lower().split()
-        self.scene.clearSelection()
         self.search_matches = []
         self.search_index = -1
         if words:
             for item in self.scene.items_for_save():
                 haystack = self.rb_search_text(item).lower()
                 if all(w in haystack for w in words):
-                    item.setSelected(True)
                     self.search_matches.append(item)
         text_count = len(self.search_matches)
         # Also images that look like the query (content model)
@@ -613,8 +611,17 @@ class RBoardMixin:
         if looks:
             for item in looks:
                 if item not in self.search_matches:
-                    item.setSelected(True)
                     self.search_matches.append(item)
+        # Select in one go: one selectionChanged instead of one per item
+        # (each recomputes the multi-selection's bounds)
+        blocked = self.scene.blockSignals(True)
+        try:
+            self.scene.clearSelection()
+            for item in self.search_matches:
+                item.setSelected(True)
+        finally:
+            self.scene.blockSignals(blocked)
+        self.scene.selectionChanged.emit()
         self.search_bar.set_count(
             text_count, query, None if looks is None
             else len(self.search_matches) - text_count)
